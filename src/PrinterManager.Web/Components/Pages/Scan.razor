@@ -1,0 +1,156 @@
+@page "/scan"
+@inject IApiService ApiService
+
+<PageTitle>Druckerserver scannen</PageTitle>
+
+<h1>Druckerserver scannen</h1>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <h5 class="card-title">Server scannen</h5>
+        <EditForm Model="@scanDto" OnValidSubmit="ScanServer">
+            <div class="mb-3">
+                <label class="form-label">Servername:</label>
+                <InputText class="form-control" @bind-Value="scanDto.ServerName" placeholder="printserver01" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Benutzername (optional):</label>
+                <InputText class="form-control" @bind-Value="scanDto.Username" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Passwort (optional):</label>
+                <InputText type="password" class="form-control" @bind-Value="scanDto.Password" />
+            </div>
+            <button type="submit" class="btn btn-primary" disabled="@isScanning">
+                @if (isScanning)
+                {
+                    <span>Scanne...</span>
+                }
+                else
+                {
+                    <span>Server scannen</span>
+                }
+            </button>
+        </EditForm>
+    </div>
+</div>
+
+@if (scannedPrinters != null && scannedPrinters.Any())
+{
+    <h3>Gefundene Drucker (@scannedPrinters.Count)</h3>
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>
+                    <input type="checkbox" @onchange="ToggleSelectAll" checked="@selectAll" />
+                </th>
+                <th>Name</th>
+                <th>Freigabename</th>
+                <th>Freigabepfad</th>
+                <th>Standort</th>
+                <th>Treiber</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var printer in scannedPrinters)
+            {
+                <tr>
+                    <td>
+                        <input type="checkbox" @bind="selectedPrinters[printer.SharePath]" />
+                    </td>
+                    <td>@printer.Name</td>
+                    <td>@printer.ShareName</td>
+                    <td><code>@printer.SharePath</code></td>
+                    <td>@printer.Location</td>
+                    <td>@printer.DriverName</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    <button class="btn btn-success" @onclick="ImportSelected" disabled="@(!selectedPrinters.Any(x => x.Value))">
+        Ausgewählte Drucker importieren (@selectedPrinters.Count(x => x.Value))
+    </button>
+}
+else if (scannedPrinters != null)
+{
+    <div class="alert alert-info">Keine Drucker gefunden.</div>
+}
+
+@if (!string.IsNullOrEmpty(message))
+{
+    <div class="alert alert-success mt-3">@message</div>
+}
+
+@code {
+    private PrintServerScanDto scanDto = new() { ServerName = "" };
+    private List<ScannedPrinterDto>? scannedPrinters;
+    private Dictionary<string, bool> selectedPrinters = new();
+    private bool isScanning = false;
+    private bool selectAll = false;
+    private string message = "";
+
+    private async Task ScanServer()
+    {
+        isScanning = true;
+        message = "";
+        try
+        {
+            scannedPrinters = await ApiService.ScanPrintServerAsync(scanDto);
+            selectedPrinters = scannedPrinters.ToDictionary(p => p.SharePath, p => false);
+        }
+        catch (Exception ex)
+        {
+            message = $"Fehler beim Scannen: {ex.Message}";
+        }
+        finally
+        {
+            isScanning = false;
+        }
+    }
+
+    private void ToggleSelectAll(ChangeEventArgs e)
+    {
+        selectAll = (bool)(e.Value ?? false);
+        if (scannedPrinters != null)
+        {
+            selectedPrinters = scannedPrinters.ToDictionary(p => p.SharePath, p => selectAll);
+        }
+    }
+
+    private async Task ImportSelected()
+    {
+        var toImport = scannedPrinters?
+            .Where(p => selectedPrinters.ContainsKey(p.SharePath) && selectedPrinters[p.SharePath])
+            .ToList();
+
+        if (toImport == null || !toImport.Any())
+            return;
+
+        int imported = 0;
+        foreach (var printer in toImport)
+        {
+            try
+            {
+                await ApiService.CreatePrinterAsync(new CreatePrinterDto
+                {
+                    PrinterId = Guid.NewGuid().ToString(),
+                    Name = printer.Name,
+                    SharePath = printer.SharePath,
+                    Description = printer.Comment,
+                    Location = printer.Location,
+                    ServerName = scanDto.ServerName
+                });
+                imported++;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Fehler beim Importieren von {printer.Name}: {ex.Message}");
+            }
+        }
+
+        message = $"{imported} von {toImport.Count} Druckern erfolgreich importiert.";
+        scannedPrinters = null;
+        selectedPrinters.Clear();
+    }
+}

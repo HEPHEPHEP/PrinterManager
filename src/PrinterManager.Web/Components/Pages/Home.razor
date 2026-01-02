@@ -1,0 +1,89 @@
+@page "/"
+@inject IApiService ApiService
+
+<PageTitle>Übersicht</PageTitle>
+
+<h1>Windows Printer Manager</h1>
+
+<div class="row mt-4">
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Drucker</h5>
+                <p class="card-text display-4">@printerCount</p>
+                <a href="/printers" class="btn btn-primary">Verwalten</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Clients</h5>
+                <p class="card-text display-4">@clientCount</p>
+                <a href="/clients" class="btn btn-primary">Anzeigen</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Benutzer</h5>
+                <p class="card-text display-4">@userCount</p>
+                <a href="/clients" class="btn btn-primary">Anzeigen</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Zuweisungen</h5>
+                <p class="card-text display-4">@assignmentCount</p>
+                <a href="/assignments" class="btn btn-primary">Verwalten</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="mt-4">
+    <h3>Schnellaktionen</h3>
+    <div class="list-group">
+        <a href="/scan" class="list-group-item list-group-item-action">
+            <strong>Druckerserver scannen</strong> - Neue Drucker von einem Server importieren
+        </a>
+        <a href="/printers" class="list-group-item list-group-item-action">
+            <strong>Drucker hinzufügen</strong> - Manuell einen neuen Drucker hinzufügen
+        </a>
+        <a href="/assignments" class="list-group-item list-group-item-action">
+            <strong>Zuweisung erstellen</strong> - Drucker Benutzern oder Clients zuweisen
+        </a>
+    </div>
+</div>
+
+@code {
+    private int printerCount = 0;
+    private int clientCount = 0;
+    private int userCount = 0;
+    private int assignmentCount = 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var printers = await ApiService.GetPrintersAsync();
+            printerCount = printers.Count;
+
+            var clients = await ApiService.GetClientsAsync();
+            clientCount = clients.Count;
+
+            var users = await ApiService.GetUsersAsync();
+            userCount = users.Count;
+
+            var assignments = await ApiService.GetAssignmentsAsync();
+            assignmentCount = assignments.Count;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading data: {ex.Message}");
+        }
+    }
+}

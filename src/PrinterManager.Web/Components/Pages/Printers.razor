@@ -1,0 +1,216 @@
+@page "/printers"
+@inject IApiService ApiService
+
+<PageTitle>Drucker</PageTitle>
+
+<h1>Drucker verwalten</h1>
+
+<div class="mb-3">
+    <button class="btn btn-primary" @onclick="ShowAddPrinterForm">Neuer Drucker</button>
+</div>
+
+@if (showAddForm)
+{
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5 class="card-title">Neuen Drucker hinzufügen</h5>
+            <EditForm Model="@newPrinter" OnValidSubmit="AddPrinter">
+                <div class="mb-3">
+                    <label class="form-label">Drucker-ID:</label>
+                    <InputText class="form-control" @bind-Value="newPrinter.PrinterId" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Name:</label>
+                    <InputText class="form-control" @bind-Value="newPrinter.Name" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Freigabepfad (SMB):</label>
+                    <InputText class="form-control" @bind-Value="newPrinter.SharePath" placeholder="\\server\drucker" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Beschreibung:</label>
+                    <InputText class="form-control" @bind-Value="newPrinter.Description" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Standort:</label>
+                    <InputText class="form-control" @bind-Value="newPrinter.Location" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Servername:</label>
+                    <InputText class="form-control" @bind-Value="newPrinter.ServerName" />
+                </div>
+                <button type="submit" class="btn btn-success">Hinzufügen</button>
+                <button type="button" class="btn btn-secondary" @onclick="() => showAddForm = false">Abbrechen</button>
+            </EditForm>
+        </div>
+    </div>
+}
+
+@if (printers == null)
+{
+    <p><em>Laden...</em></p>
+}
+else if (!printers.Any())
+{
+    <p>Keine Drucker vorhanden.</p>
+}
+else
+{
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Freigabepfad</th>
+                <th>Standort</th>
+                <th>Status</th>
+                <th>Ersatzdrucker</th>
+                <th>Aktionen</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var printer in printers)
+            {
+                <tr>
+                    <td>@printer.Name</td>
+                    <td><code>@printer.SharePath</code></td>
+                    <td>@printer.Location</td>
+                    <td>
+                        @if (printer.IsAvailable)
+                        {
+                            <span class="badge bg-success">Verfügbar</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-warning">Nicht verfügbar</span>
+                        }
+                    </td>
+                    <td>@(printer.ReplacementPrinterName ?? "-")</td>
+                    <td>
+                        <button class="btn btn-sm btn-warning" @onclick="() => ToggleAvailability(printer)">
+                            @(printer.IsAvailable ? "Deaktivieren" : "Aktivieren")
+                        </button>
+                        <button class="btn btn-sm btn-info" @onclick="() => EditPrinter(printer)">Bearbeiten</button>
+                        <button class="btn btn-sm btn-danger" @onclick="() => DeletePrinter(printer.Id)">Löschen</button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@if (editingPrinter != null)
+{
+    <div class="modal show d-block" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Drucker bearbeiten: @editingPrinter.Name</h5>
+                </div>
+                <div class="modal-body">
+                    <EditForm Model="@updateDto" OnValidSubmit="SavePrinter">
+                        <div class="mb-3">
+                            <label class="form-label">Name:</label>
+                            <InputText class="form-control" @bind-Value="updateDto.Name" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Beschreibung:</label>
+                            <InputText class="form-control" @bind-Value="updateDto.Description" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Standort:</label>
+                            <InputText class="form-control" @bind-Value="updateDto.Location" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Ersatzdrucker:</label>
+                            <InputSelect class="form-control" @bind-Value="updateDto.ReplacementPrinterId">
+                                <option value="0">-- Kein Ersatzdrucker --</option>
+                                @foreach (var p in printers.Where(p => p.Id != editingPrinter.Id))
+                                {
+                                    <option value="@p.Id">@p.Name</option>
+                                }
+                            </InputSelect>
+                        </div>
+                        <button type="submit" class="btn btn-success">Speichern</button>
+                        <button type="button" class="btn btn-secondary" @onclick="CancelEdit">Abbrechen</button>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-backdrop show"></div>
+}
+
+@code {
+    private List<PrinterDto>? printers;
+    private bool showAddForm = false;
+    private CreatePrinterDto newPrinter = new() { PrinterId = "", Name = "", SharePath = "" };
+    private PrinterDto? editingPrinter;
+    private UpdatePrinterDto updateDto = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadPrinters();
+    }
+
+    private async Task LoadPrinters()
+    {
+        printers = await ApiService.GetPrintersAsync();
+    }
+
+    private void ShowAddPrinterForm()
+    {
+        showAddForm = true;
+        newPrinter = new() { PrinterId = "", Name = "", SharePath = "" };
+    }
+
+    private async Task AddPrinter()
+    {
+        await ApiService.CreatePrinterAsync(newPrinter);
+        showAddForm = false;
+        await LoadPrinters();
+    }
+
+    private void EditPrinter(PrinterDto printer)
+    {
+        editingPrinter = printer;
+        updateDto = new UpdatePrinterDto
+        {
+            Name = printer.Name,
+            Description = printer.Description,
+            Location = printer.Location,
+            ReplacementPrinterId = printer.ReplacementPrinterId
+        };
+    }
+
+    private async Task SavePrinter()
+    {
+        if (editingPrinter != null)
+        {
+            await ApiService.UpdatePrinterAsync(editingPrinter.Id, updateDto);
+            editingPrinter = null;
+            await LoadPrinters();
+        }
+    }
+
+    private void CancelEdit()
+    {
+        editingPrinter = null;
+    }
+
+    private async Task ToggleAvailability(PrinterDto printer)
+    {
+        await ApiService.SetPrinterAvailabilityAsync(printer.Id, !printer.IsAvailable);
+        await LoadPrinters();
+    }
+
+    private async Task DeletePrinter(int id)
+    {
+        if (confirm("Möchten Sie diesen Drucker wirklich löschen?"))
+        {
+            await ApiService.DeletePrinterAsync(id);
+            await LoadPrinters();
+        }
+    }
+
+    private bool confirm(string message) => true; // Simplified for demo
+}

@@ -1,0 +1,123 @@
+@page "/configuration"
+@inject IApiService ApiService
+
+<PageTitle>Konfiguration</PageTitle>
+
+<h1>Systemkonfiguration</h1>
+
+@if (config == null)
+{
+    <p><em>Laden...</em></p>
+}
+else
+{
+    <div class="card">
+        <div class="card-body">
+            <h5 class="card-title">Zuweisungspriorität</h5>
+            <p class="text-muted">
+                Legt fest, welche Zuweisungen Vorrang haben, wenn sowohl Benutzer- als auch Client-Zuweisungen existieren.
+            </p>
+
+            <EditForm Model="@config" OnValidSubmit="SaveConfiguration">
+                <div class="mb-3">
+                    <label class="form-label">Priorität:</label>
+                    <InputSelect class="form-control" @bind-Value="config.AssignmentPriority">
+                        <option value="@AssignmentPriority.UserPriority">Benutzer-Zuweisungen haben Priorität</option>
+                        <option value="@AssignmentPriority.ClientPriority">Client-Zuweisungen haben Priorität</option>
+                    </InputSelect>
+                    <div class="form-text">
+                        @if (config.AssignmentPriority == AssignmentPriority.UserPriority)
+                        {
+                            <text>Wenn ein Benutzer angemeldet ist und Benutzer-Zuweisungen existieren, werden diese verwendet. Andernfalls werden Client-Zuweisungen verwendet.</text>
+                        }
+                        else
+                        {
+                            <text>Wenn Client-Zuweisungen existieren, werden diese verwendet. Andernfalls werden Benutzer-Zuweisungen verwendet.</text>
+                        }
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <div class="form-check">
+                        <InputCheckbox class="form-check-input" @bind-Value="config.AutoAssignReplacementPrinters" />
+                        <label class="form-check-label">
+                            Ersatzdrucker automatisch zuweisen
+                        </label>
+                        <div class="form-text">
+                            Wenn aktiviert, werden Ersatzdrucker automatisch zugewiesen, wenn der ursprüngliche Drucker als nicht verfügbar markiert wird.
+                        </div>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-primary">Konfiguration speichern</button>
+            </EditForm>
+
+            @if (!string.IsNullOrEmpty(message))
+            {
+                <div class="alert alert-success mt-3">@message</div>
+            }
+        </div>
+    </div>
+
+    <div class="card mt-4">
+        <div class="card-body">
+            <h5 class="card-title">Funktionsweise</h5>
+
+            <h6 class="mt-3">Zuweisungspriorität</h6>
+            <p>
+                Die Zuweisungspriorität bestimmt, welche Drucker einem Client zugewiesen werden, wenn sowohl
+                Benutzer- als auch Client-spezifische Zuweisungen existieren:
+            </p>
+            <ul>
+                <li><strong>Benutzer-Priorität:</strong> Drucker werden basierend auf dem angemeldeten Benutzer zugewiesen.
+                    Nur wenn keine Benutzer-Zuweisungen vorhanden sind, werden Client-Zuweisungen verwendet.</li>
+                <li><strong>Client-Priorität:</strong> Drucker werden basierend auf dem Client-Computer zugewiesen.
+                    Nur wenn keine Client-Zuweisungen vorhanden sind, werden Benutzer-Zuweisungen verwendet.</li>
+            </ul>
+
+            <h6 class="mt-3">Ersatzdrucker</h6>
+            <p>
+                Für jeden Drucker kann ein Ersatzdrucker definiert werden. Wenn ein Drucker als "nicht verfügbar"
+                markiert wird und ein Ersatzdrucker konfiguriert ist:
+            </p>
+            <ul>
+                <li>Der Ersatzdrucker wird automatisch allen Clients/Benutzern zugewiesen, die den ursprünglichen Drucker hatten</li>
+                <li>Wenn der ursprüngliche Drucker wieder verfügbar wird, werden die Zuweisungen automatisch wiederhergestellt</li>
+            </ul>
+
+            <h6 class="mt-3">Client-Registrierung</h6>
+            <p>
+                Clients registrieren sich automatisch beim ersten Start des PrinterManager-Client-Dienstes:
+            </p>
+            <ul>
+                <li>Hostname und UserPrincipalName werden übermittelt</li>
+                <li>Bereits installierte Drucker werden in der Datenbank erfasst</li>
+                <li>Der Client prüft regelmäßig auf neue Zuweisungen</li>
+            </ul>
+        </div>
+    </div>
+}
+
+@code {
+    private SystemConfiguration? config;
+    private string message = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        config = await ApiService.GetConfigurationAsync();
+    }
+
+    private async Task SaveConfiguration()
+    {
+        if (config != null)
+        {
+            await ApiService.UpdateConfigurationAsync(config);
+            message = "Konfiguration erfolgreich gespeichert!";
+            StateHasChanged();
+
+            await Task.Delay(3000);
+            message = "";
+            StateHasChanged();
+        }
+    }
+}

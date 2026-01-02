@@ -1,0 +1,178 @@
+@page "/assignments"
+@inject IApiService ApiService
+
+<PageTitle>Zuweisungen</PageTitle>
+
+<h1>Druckerzuweisungen verwalten</h1>
+
+<div class="mb-3">
+    <button class="btn btn-primary" @onclick="ShowAddForm">Neue Zuweisung</button>
+</div>
+
+@if (showAddAssignmentForm)
+{
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5 class="card-title">Neue Zuweisung erstellen</h5>
+            <EditForm Model="@newAssignment" OnValidSubmit="AddAssignment">
+                <div class="mb-3">
+                    <label class="form-label">Drucker:</label>
+                    <InputSelect class="form-control" @bind-Value="newAssignment.PrinterId">
+                        <option value="0">-- Drucker auswählen --</option>
+                        @foreach (var printer in printers ?? new())
+                        {
+                            <option value="@printer.Id">@printer.Name (@printer.SharePath)</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Zuweisungstyp:</label>
+                    <InputSelect class="form-control" @bind-Value="newAssignment.AssignmentType" @oninput="OnAssignmentTypeChanged">
+                        <option value="User">Benutzer</option>
+                        <option value="Client">Client</option>
+                    </InputSelect>
+                </div>
+                @if (newAssignment.AssignmentType == "User")
+                {
+                    <div class="mb-3">
+                        <label class="form-label">Benutzer:</label>
+                        <InputSelect class="form-control" @bind-Value="newAssignment.UserId">
+                            <option value="">-- Benutzer auswählen --</option>
+                            @foreach (var user in users ?? new())
+                            {
+                                <option value="@user.Id">@user.UserPrincipalName</option>
+                            }
+                        </InputSelect>
+                    </div>
+                }
+                else
+                {
+                    <div class="mb-3">
+                        <label class="form-label">Client:</label>
+                        <InputSelect class="form-control" @bind-Value="newAssignment.ClientId">
+                            <option value="">-- Client auswählen --</option>
+                            @foreach (var client in clients ?? new())
+                            {
+                                <option value="@client.Id">@client.Hostname (@client.IpAddress)</option>
+                            }
+                        </InputSelect>
+                    </div>
+                }
+                <div class="mb-3">
+                    <div class="form-check">
+                        <InputCheckbox class="form-check-input" @bind-Value="newAssignment.IsDefaultPrinter" />
+                        <label class="form-check-label">Als Standarddrucker festlegen</label>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-success">Zuweisung erstellen</button>
+                <button type="button" class="btn btn-secondary" @onclick="() => showAddAssignmentForm = false">Abbrechen</button>
+            </EditForm>
+        </div>
+    </div>
+}
+
+@if (assignments == null)
+{
+    <p><em>Laden...</em></p>
+}
+else if (!assignments.Any())
+{
+    <p>Keine Zuweisungen vorhanden.</p>
+}
+else
+{
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Drucker</th>
+                <th>Typ</th>
+                <th>Zugewiesen an</th>
+                <th>Standarddrucker</th>
+                <th>Aktionen</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var assignment in assignments)
+            {
+                <tr>
+                    <td>@assignment.PrinterName</td>
+                    <td>
+                        <span class="badge bg-@(assignment.AssignmentType == "User" ? "primary" : "info")">
+                            @assignment.AssignmentType
+                        </span>
+                    </td>
+                    <td>
+                        @if (assignment.AssignmentType == "User")
+                        {
+                            <text>@assignment.UserPrincipalName</text>
+                        }
+                        else
+                        {
+                            <text>@assignment.ClientHostname</text>
+                        }
+                    </td>
+                    <td>
+                        @if (assignment.IsDefaultPrinter)
+                        {
+                            <span class="badge bg-success">Ja</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-secondary">Nein</span>
+                        }
+                    </td>
+                    <td>
+                        <button class="btn btn-sm btn-danger" @onclick="() => DeleteAssignment(assignment.Id)">Löschen</button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private List<AssignmentDto>? assignments;
+    private List<PrinterDto>? printers;
+    private List<UserInfo>? users;
+    private List<ClientInfo>? clients;
+    private bool showAddAssignmentForm = false;
+    private CreateAssignmentDto newAssignment = new() { AssignmentType = "User" };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        assignments = await ApiService.GetAssignmentsAsync();
+        printers = await ApiService.GetPrintersAsync();
+        users = await ApiService.GetUsersAsync();
+        clients = await ApiService.GetClientsAsync();
+    }
+
+    private void ShowAddForm()
+    {
+        showAddAssignmentForm = true;
+        newAssignment = new() { AssignmentType = "User" };
+    }
+
+    private void OnAssignmentTypeChanged(ChangeEventArgs e)
+    {
+        newAssignment.UserId = null;
+        newAssignment.ClientId = null;
+    }
+
+    private async Task AddAssignment()
+    {
+        await ApiService.CreateAssignmentAsync(newAssignment);
+        showAddAssignmentForm = false;
+        await LoadData();
+    }
+
+    private async Task DeleteAssignment(int id)
+    {
+        await ApiService.DeleteAssignmentAsync(id);
+        await LoadData();
+    }
+}
