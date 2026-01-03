@@ -70,6 +70,7 @@ builder.Services.AddScoped<IClientService, ClientService>();
 builder.Services.AddScoped<IPrintServerScanService, PrintServerScanService>();
 builder.Services.AddScoped<IAuthenticationService, AuthenticationService>();
 builder.Services.AddScoped<ILdapService, LdapService>();
+builder.Services.AddScoped<ISecurityConfigService, SecurityConfigService>();
 
 // Add CORS
 builder.Services.AddCors(options =>
@@ -82,14 +83,10 @@ builder.Services.AddCors(options =>
     });
 });
 
-// Configure HTTPS
+// Configure HTTP only by default (HTTPS can be enabled in UI)
 builder.WebHost.ConfigureKestrel(options =>
 {
     options.ListenAnyIP(5000); // HTTP
-    options.ListenAnyIP(5443, listenOptions =>
-    {
-        listenOptions.UseHttps(); // HTTPS
-    });
 });
 
 var app = builder.Build();
@@ -108,7 +105,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseHttpsRedirection();
+// Don't force HTTPS redirection (can be enabled via UI)
 app.UseCors("AllowAll");
 app.UseAuthentication();
 app.UseAuthorization();

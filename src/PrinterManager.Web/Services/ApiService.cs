@@ -13,6 +13,13 @@ public interface IApiService
     Task<List<UserDto>> GetAppUsersAsync();
     Task<UserDto> RegisterAppUserAsync(RegisterUserDto dto);
     Task<bool> DeleteAppUserAsync(int id);
+    Task<UserDto> UpdateUserRoleAsync(int id, string role);
+
+    // Security Config
+    Task<LdapConfigDto> GetLdapConfigAsync();
+    Task<LdapConfigDto> UpdateLdapConfigAsync(LdapConfigDto dto);
+    Task<SslConfigDto> GetSslConfigAsync();
+    Task<SslConfigDto> UpdateSslConfigAsync(SslConfigDto dto);
 
     // Printers
     Task<List<PrinterDto>> GetPrintersAsync();
@@ -79,6 +86,38 @@ public class ApiService : IApiService
     {
         var response = await _httpClient.DeleteAsync($"/api/auth/users/{id}");
         return response.IsSuccessStatusCode;
+    }
+
+    public async Task<UserDto> UpdateUserRoleAsync(int id, string role)
+    {
+        var response = await _httpClient.PutAsJsonAsync($"/api/auth/users/{id}/role", new UpdateUserRoleDto { Role = role });
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<UserDto>())!;
+    }
+
+    // Security Config
+    public async Task<LdapConfigDto> GetLdapConfigAsync()
+    {
+        return (await _httpClient.GetFromJsonAsync<LdapConfigDto>("/api/securityconfig/ldap"))!;
+    }
+
+    public async Task<LdapConfigDto> UpdateLdapConfigAsync(LdapConfigDto dto)
+    {
+        var response = await _httpClient.PutAsJsonAsync("/api/securityconfig/ldap", dto);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<LdapConfigDto>())!;
+    }
+
+    public async Task<SslConfigDto> GetSslConfigAsync()
+    {
+        return (await _httpClient.GetFromJsonAsync<SslConfigDto>("/api/securityconfig/ssl"))!;
+    }
+
+    public async Task<SslConfigDto> UpdateSslConfigAsync(SslConfigDto dto)
+    {
+        var response = await _httpClient.PutAsJsonAsync("/api/securityconfig/ssl", dto);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<SslConfigDto>())!;
     }
 
     // Printers

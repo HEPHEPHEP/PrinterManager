@@ -73,4 +73,15 @@ public class AuthController : ControllerBase
 
         return Ok(user);
     }
+
+    [HttpPut("users/{id}/role")]
+    [Authorize(Roles = "Administrator")]
+    public async Task<ActionResult<UserDto>> UpdateUserRole(int id, [FromBody] UpdateUserRoleDto dto)
+    {
+        var user = await _authService.UpdateUserRoleAsync(id, dto);
+        if (user == null)
+            return NotFound();
+
+        return Ok(user);
+    }
 }

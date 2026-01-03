@@ -17,6 +17,8 @@ public class PrinterManagerDbContext : DbContext
     public DbSet<ClientPrinter> ClientPrinters => Set<ClientPrinter>();
     public DbSet<SystemConfiguration> SystemConfigurations => Set<SystemConfiguration>();
     public DbSet<ApplicationUser> ApplicationUsers => Set<ApplicationUser>();
+    public DbSet<LdapConfiguration> LdapConfigurations => Set<LdapConfiguration>();
+    public DbSet<SslConfiguration> SslConfigurations => Set<SslConfiguration>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -114,6 +116,18 @@ public class PrinterManagerDbContext : DbContext
             }
         );
 
+        // LdapConfiguration
+        modelBuilder.Entity<LdapConfiguration>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+        });
+
+        // SslConfiguration
+        modelBuilder.Entity<SslConfiguration>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+        });
+
         // Seed default admin user (password: admin)
         modelBuilder.Entity<ApplicationUser>().HasData(
             new ApplicationUser
@@ -125,6 +139,29 @@ public class PrinterManagerDbContext : DbContext
                 IsLdapUser = false,
                 Role = UserRole.Administrator,
                 CreatedAt = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+            }
+        );
+
+        // Seed default LDAP configuration
+        modelBuilder.Entity<LdapConfiguration>().HasData(
+            new LdapConfiguration
+            {
+                Id = 1,
+                Enabled = false,
+                Server = "ldap.example.com",
+                Port = 389,
+                BaseDn = "dc=example,dc=com",
+                UserDnTemplate = "uid={0},ou=users,dc=example,dc=com"
+            }
+        );
+
+        // Seed default SSL configuration
+        modelBuilder.Entity<SslConfiguration>().HasData(
+            new SslConfiguration
+            {
+                Id = 1,
+                Enabled = false,
+                HttpsPort = 5443
             }
         );
     }

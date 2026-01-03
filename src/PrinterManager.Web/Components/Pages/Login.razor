@@ -25,10 +25,6 @@
                         <label class="form-label">Passwort:</label>
                         <InputText type="password" class="form-control" @bind-Value="loginDto.Password" />
                     </div>
-                    <div class="mb-3 form-check">
-                        <InputCheckbox class="form-check-input" @bind-Value="loginDto.UseLdap" />
-                        <label class="form-check-label">LDAP verwenden</label>
-                    </div>
                     <button type="submit" class="btn btn-primary w-100" disabled="@isLoggingIn">
                         @if (isLoggingIn)
                         {

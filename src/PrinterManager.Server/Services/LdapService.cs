@@ -1,3 +1,5 @@
+using Microsoft.EntityFrameworkCore;
+using PrinterManager.Server.Data;
 using System.DirectoryServices.Protocols;
 using System.Net;
 
@@ -6,6 +8,7 @@ namespace PrinterManager.Server.Services;
 public interface ILdapService
 {
     Task<LdapAuthResult> AuthenticateAsync(string username, string password);
+    Task<bool> IsEnabledAsync();
 }
 
 public class LdapAuthResult
@@ -18,18 +21,26 @@ public class LdapAuthResult
 
 public class LdapService : ILdapService
 {
-    private readonly IConfiguration _configuration;
+    private readonly PrinterManagerDbContext _context;
 
-    public LdapService(IConfiguration configuration)
+    public LdapService(PrinterManagerDbContext context)
     {
-        _configuration = configuration;
+        _context = context;
+    }
+
+    public async Task<bool> IsEnabledAsync()
+    {
+        var config = await _context.LdapConfigurations.FirstAsync();
+        return config.Enabled;
     }
 
     public async Task<LdapAuthResult> AuthenticateAsync(string username, string password)
     {
-        return await Task.Run(() =>
+        return await Task.Run(async () =>
         {
-            if (!_configuration.GetValue<bool>("Ldap:Enabled"))
+            var config = await _context.LdapConfigurations.FirstAsync();
+
+            if (!config.Enabled)
             {
                 return new LdapAuthResult
                 {
@@ -40,10 +51,10 @@ public class LdapService : ILdapService
 
             try
             {
-                var server = _configuration["Ldap:Server"];
-                var port = _configuration.GetValue<int>("Ldap:Port", 389);
-                var baseDn = _configuration["Ldap:BaseDn"];
-                var userDnTemplate = _configuration["Ldap:UserDnTemplate"] ?? "uid={0}," + baseDn;
+                var server = config.Server;
+                var port = config.Port;
+                var baseDn = config.BaseDn;
+                var userDnTemplate = config.UserDnTemplate;
 
                 if (string.IsNullOrEmpty(server) || string.IsNullOrEmpty(baseDn))
                 {

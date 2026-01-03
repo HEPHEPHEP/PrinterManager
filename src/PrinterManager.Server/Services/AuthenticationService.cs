@@ -17,6 +17,7 @@ public interface IAuthenticationService
     Task<List<UserDto>> GetAllUsersAsync();
     Task<bool> DeleteUserAsync(int id);
     Task<UserDto?> UpdateUserAsync(int id, RegisterUserDto dto);
+    Task<UserDto?> UpdateUserRoleAsync(int id, UpdateUserRoleDto dto);
 }
 
 public class AuthenticationService : IAuthenticationService
@@ -37,8 +38,8 @@ public class AuthenticationService : IAuthenticationService
 
     public async Task<LoginResponseDto> LoginAsync(LoginDto dto)
     {
-        // Try LDAP authentication if enabled and requested
-        if (dto.UseLdap && _configuration.GetValue<bool>("Ldap:Enabled"))
+        // Try LDAP authentication if enabled
+        if (await _ldapService.IsEnabledAsync())
         {
             var ldapAuth = await _ldapService.AuthenticateAsync(dto.Username, dto.Password);
             if (ldapAuth.Success)
@@ -57,6 +58,12 @@ public class AuthenticationService : IAuthenticationService
                     Role = ldapUser.Role.ToString()
                 };
             }
+            // If LDAP is enabled but auth failed, don't try local auth
+            return new LoginResponseDto
+            {
+                Success = false,
+                Message = "LDAP-Authentifizierung fehlgeschlagen"
+            };
         }
 
         // Local authentication
@@ -168,6 +175,27 @@ public class AuthenticationService : IAuthenticationService
         }
         user.Role = Enum.Parse<UserRole>(dto.Role);
 
+        await _context.SaveChangesAsync();
+
+        return new UserDto
+        {
+            Id = user.Id,
+            Username = user.Username,
+            Email = user.Email,
+            FullName = user.FullName,
+            IsActive = user.IsActive,
+            IsLdapUser = user.IsLdapUser,
+            Role = user.Role.ToString()
+        };
+    }
+
+    public async Task<UserDto?> UpdateUserRoleAsync(int id, UpdateUserRoleDto dto)
+    {
+        var user = await _context.ApplicationUsers.FindAsync(id);
+        if (user == null)
+            return null;
+
+        user.Role = Enum.Parse<UserRole>(dto.Role);
         await _context.SaveChangesAsync();
 
         return new UserDto
