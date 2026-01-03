@@ -33,7 +33,7 @@ else
                 <th>Betriebssystem</th>
                 <th>Status</th>
                 <th>Zuletzt gesehen</th>
-                @if (AuthState.IsAdmin)
+                @if (AuthState.Role == "Administrator")
                 {
                     <th>Aktionen</th>
                 }
@@ -61,7 +61,7 @@ else
                         }
                     </td>
                     <td>@client.LastSeen.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss")</td>
-                    @if (AuthState.IsAdmin)
+                    @if (AuthState.Role == "Administrator")
                     {
                         <td>
                             <button class="btn btn-danger btn-sm" @onclick="() => DeleteClient(client.Id)">Löschen</button>
