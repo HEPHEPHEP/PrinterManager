@@ -32,11 +32,14 @@ public interface IApiService
     // Assignments
     Task<List<AssignmentDto>> GetAssignmentsAsync();
     Task<AssignmentDto> CreateAssignmentAsync(CreateAssignmentDto dto);
+    Task<List<AssignmentDto>> CreateBulkAssignmentsAsync(BulkAssignmentDto dto);
     Task<bool> DeleteAssignmentAsync(int id);
 
     // Clients and Users
     Task<List<ClientInfo>> GetClientsAsync();
     Task<List<UserInfo>> GetUsersAsync();
+    Task<bool> DeleteClientAsync(int id);
+    Task<bool> DeleteUserAsync(int id);
 
     // Print Server Scan
     Task<List<ScannedPrinterDto>> ScanPrintServerAsync(PrintServerScanDto dto);
@@ -181,6 +184,13 @@ public class ApiService : IApiService
         return (await response.Content.ReadFromJsonAsync<AssignmentDto>())!;
     }
 
+    public async Task<List<AssignmentDto>> CreateBulkAssignmentsAsync(BulkAssignmentDto dto)
+    {
+        var response = await _httpClient.PostAsJsonAsync("/api/assignments/bulk", dto);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<List<AssignmentDto>>())!;
+    }
+
     public async Task<bool> DeleteAssignmentAsync(int id)
     {
         var response = await _httpClient.DeleteAsync($"/api/assignments/{id}");
@@ -196,6 +206,18 @@ public class ApiService : IApiService
     public async Task<List<UserInfo>> GetUsersAsync()
     {
         return await _httpClient.GetFromJsonAsync<List<UserInfo>>("/api/clients/users") ?? new List<UserInfo>();
+    }
+
+    public async Task<bool> DeleteClientAsync(int id)
+    {
+        var response = await _httpClient.DeleteAsync($"/api/clients/{id}");
+        return response.IsSuccessStatusCode;
+    }
+
+    public async Task<bool> DeleteUserAsync(int id)
+    {
+        var response = await _httpClient.DeleteAsync($"/api/clients/users/{id}");
+        return response.IsSuccessStatusCode;
     }
 
     // Print Server Scan

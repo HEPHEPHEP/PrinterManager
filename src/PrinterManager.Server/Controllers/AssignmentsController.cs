@@ -43,6 +43,13 @@ public class AssignmentsController : ControllerBase
         return CreatedAtAction(nameof(GetAll), new { id = assignment.Id }, assignment);
     }
 
+    [HttpPost("bulk")]
+    public async Task<ActionResult<List<AssignmentDto>>> CreateBulk([FromBody] BulkAssignmentDto dto)
+    {
+        var assignments = await _assignmentService.CreateBulkAssignmentsAsync(dto);
+        return Ok(assignments);
+    }
+
     [HttpDelete("{id}")]
     public async Task<ActionResult> Delete(int id)
     {

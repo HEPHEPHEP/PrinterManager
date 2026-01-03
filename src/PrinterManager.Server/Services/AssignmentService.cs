@@ -11,6 +11,7 @@ public interface IAssignmentService
     Task<List<AssignmentDto>> GetAssignmentsForUserAsync(int userId);
     Task<List<AssignmentDto>> GetAssignmentsForClientAsync(int clientId);
     Task<AssignmentDto> CreateAssignmentAsync(CreateAssignmentDto dto);
+    Task<List<AssignmentDto>> CreateBulkAssignmentsAsync(BulkAssignmentDto dto);
     Task<bool> DeleteAssignmentAsync(int id);
     Task ApplyReplacementPrinterAsync(int originalPrinterId, int replacementPrinterId);
     Task RestoreOriginalPrinterAsync(int originalPrinterId);
@@ -36,6 +37,7 @@ public class AssignmentService : IAssignmentService
                 Id = a.Id,
                 PrinterId = a.PrinterId,
                 PrinterName = a.Printer!.Name,
+                ServiceNumber = a.Printer!.ServiceNumber,
                 AssignmentType = a.AssignmentType.ToString(),
                 UserId = a.UserId,
                 UserPrincipalName = a.User != null ? a.User.UserPrincipalName : null,
@@ -56,6 +58,7 @@ public class AssignmentService : IAssignmentService
                 Id = a.Id,
                 PrinterId = a.PrinterId,
                 PrinterName = a.Printer!.Name,
+                ServiceNumber = a.Printer!.ServiceNumber,
                 AssignmentType = a.AssignmentType.ToString(),
                 UserId = a.UserId,
                 IsDefaultPrinter = a.IsDefaultPrinter
@@ -73,6 +76,7 @@ public class AssignmentService : IAssignmentService
                 Id = a.Id,
                 PrinterId = a.PrinterId,
                 PrinterName = a.Printer!.Name,
+                ServiceNumber = a.Printer!.ServiceNumber,
                 AssignmentType = a.AssignmentType.ToString(),
                 ClientId = a.ClientId,
                 IsDefaultPrinter = a.IsDefaultPrinter
@@ -107,6 +111,7 @@ public class AssignmentService : IAssignmentService
             Id = created.Id,
             PrinterId = created.PrinterId,
             PrinterName = created.Printer!.Name,
+            ServiceNumber = created.Printer!.ServiceNumber,
             AssignmentType = created.AssignmentType.ToString(),
             UserId = created.UserId,
             UserPrincipalName = created.User?.UserPrincipalName,
@@ -114,6 +119,36 @@ public class AssignmentService : IAssignmentService
             ClientHostname = created.Client?.Hostname,
             IsDefaultPrinter = created.IsDefaultPrinter
         };
+    }
+
+    public async Task<List<AssignmentDto>> CreateBulkAssignmentsAsync(BulkAssignmentDto dto)
+    {
+        var assignmentType = Enum.Parse<AssignmentType>(dto.AssignmentType);
+        var createdAssignments = new List<AssignmentDto>();
+
+        var targetIds = assignmentType == AssignmentType.User ? dto.UserIds : dto.ClientIds;
+
+        foreach (var printerId in dto.PrinterIds)
+        {
+            foreach (var targetId in targetIds)
+            {
+                var assignment = new PrinterAssignment
+                {
+                    PrinterId = printerId,
+                    AssignmentType = assignmentType,
+                    UserId = assignmentType == AssignmentType.User ? targetId : null,
+                    ClientId = assignmentType == AssignmentType.Client ? targetId : null,
+                    IsDefaultPrinter = dto.IsDefaultPrinter
+                };
+
+                _context.PrinterAssignments.Add(assignment);
+            }
+        }
+
+        await _context.SaveChangesAsync();
+
+        // Reload all created assignments with their related data
+        return await GetAllAssignmentsAsync();
     }
 
     public async Task<bool> DeleteAssignmentAsync(int id)

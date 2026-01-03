@@ -3,6 +3,7 @@
 @inject IApiService ApiService
 @inject AuthStateService AuthState
 @inject NavigationManager Navigation
+@inject IJSRuntime JSRuntime
 
 <PageTitle>Benutzer</PageTitle>
 
@@ -31,13 +32,21 @@ else
                 <th>Anzeigename</th>
                 <th>Status</th>
                 <th>Zuletzt gesehen</th>
+                @if (AuthState.IsAdmin)
+                {
+                    <th>Aktionen</th>
+                }
             </tr>
         </thead>
         <tbody>
             @foreach (var user in users)
             {
                 <tr>
-                    <td>@user.UserPrincipalName</td>
+                    <td>
+                        <a href="@($"/assignments?search={Uri.EscapeDataString(user.UserPrincipalName)}&type=User")" class="text-decoration-none">
+                            @user.UserPrincipalName
+                        </a>
+                    </td>
                     <td>@(user.DisplayName ?? "-")</td>
                     <td>
                         @if (user.IsActive)
@@ -50,6 +59,12 @@ else
                         }
                     </td>
                     <td>@user.LastSeen.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss")</td>
+                    @if (AuthState.IsAdmin)
+                    {
+                        <td>
+                            <button class="btn btn-danger btn-sm" @onclick="() => DeleteUser(user.Id)">Löschen</button>
+                        </td>
+                    }
                 </tr>
             }
         </tbody>
@@ -62,6 +77,24 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        await LoadUsers();
+    }
+
+    private async Task LoadUsers()
+    {
         users = await ApiService.GetUsersAsync();
+    }
+
+    private async Task DeleteUser(int id)
+    {
+        var confirmed = await JSRuntime.InvokeAsync<bool>("confirm", "Möchten Sie diesen Benutzer wirklich löschen?");
+        if (confirmed)
+        {
+            var success = await ApiService.DeleteUserAsync(id);
+            if (success)
+            {
+                await LoadUsers();
+            }
+        }
     }
 }

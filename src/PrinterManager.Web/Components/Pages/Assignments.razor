@@ -3,6 +3,7 @@
 @inject IApiService ApiService
 @inject AuthStateService AuthState
 @inject NavigationManager Navigation
+@using Microsoft.AspNetCore.WebUtilities
 
 <PageTitle>Zuweisungen</PageTitle>
 
@@ -18,61 +19,134 @@ else
     <button class="btn btn-primary" @onclick="ShowAddForm">Neue Zuweisung</button>
 </div>
 
+<div class="row mb-3">
+    <div class="col-md-8">
+        <InputText class="form-control" @bind-Value="searchText" @bind-Value:event="oninput"
+                   placeholder="Suche nach Drucker, Servicenummer, Benutzer oder Client..." />
+    </div>
+    <div class="col-md-4">
+        <InputSelect class="form-control" @bind-Value="filterType">
+            <option value="">Alle Typen</option>
+            <option value="User">Benutzer</option>
+            <option value="Client">Client</option>
+        </InputSelect>
+    </div>
+</div>
+
 @if (showAddAssignmentForm)
 {
     <div class="card mb-3">
         <div class="card-body">
             <h5 class="card-title">Neue Zuweisung erstellen</h5>
-            <EditForm Model="@newAssignment" OnValidSubmit="AddAssignment">
-                <div class="mb-3">
-                    <label class="form-label">Drucker:</label>
-                    <InputSelect class="form-control" @bind-Value="newAssignment.PrinterId">
-                        <option value="0">-- Drucker auswählen --</option>
-                        @foreach (var printer in printers ?? new())
-                        {
-                            <option value="@printer.Id">@printer.Name (@printer.SharePath)</option>
-                        }
-                    </InputSelect>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Zuweisungstyp:</label>
-                    <InputSelect class="form-control" @bind-Value="newAssignment.AssignmentType" @oninput="OnAssignmentTypeChanged">
-                        <option value="User">Benutzer</option>
-                        <option value="Client">Client</option>
-                    </InputSelect>
-                </div>
-                @if (newAssignment.AssignmentType == "User")
+            <div class="mb-3 form-check">
+                <InputCheckbox class="form-check-input" @bind-Value="isBulkMode" />
+                <label class="form-check-label">Mehrere Drucker mehreren Benutzern/Clients zuweisen (Bulk-Modus)</label>
+            </div>
+            <EditForm Model="@(isBulkMode ? (object)bulkAssignment : newAssignment)" OnValidSubmit="AddAssignment">
+                @if (isBulkMode)
                 {
                     <div class="mb-3">
-                        <label class="form-label">Benutzer:</label>
-                        <InputSelect class="form-control" @bind-Value="newAssignment.UserId">
-                            <option value="">-- Benutzer auswählen --</option>
-                            @foreach (var user in users ?? new())
+                        <label class="form-label">Drucker (Mehrfachauswahl mit Strg/Cmd):</label>
+                        <select class="form-control" multiple @onchange="OnPrintersSelected" size="5">
+                            @foreach (var printer in printers ?? new())
                             {
-                                <option value="@user.Id">@user.UserPrincipalName</option>
+                                <option value="@printer.Id">@printer.Name (@printer.SharePath)</option>
                             }
+                        </select>
+                        <small class="form-text text-muted">Ausgewählt: @bulkAssignment.PrinterIds.Count Drucker</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Zuweisungstyp:</label>
+                        <InputSelect class="form-control" @bind-Value="bulkAssignment.AssignmentType" @oninput="OnBulkAssignmentTypeChanged">
+                            <option value="User">Benutzer</option>
+                            <option value="Client">Client</option>
                         </InputSelect>
+                    </div>
+                    @if (bulkAssignment.AssignmentType == "User")
+                    {
+                        <div class="mb-3">
+                            <label class="form-label">Benutzer (Mehrfachauswahl mit Strg/Cmd):</label>
+                            <select class="form-control" multiple @onchange="OnUsersSelected" size="5">
+                                @foreach (var user in users ?? new())
+                                {
+                                    <option value="@user.Id">@user.UserPrincipalName</option>
+                                }
+                            </select>
+                            <small class="form-text text-muted">Ausgewählt: @bulkAssignment.UserIds.Count Benutzer</small>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="mb-3">
+                            <label class="form-label">Clients (Mehrfachauswahl mit Strg/Cmd):</label>
+                            <select class="form-control" multiple @onchange="OnClientsSelected" size="5">
+                                @foreach (var client in clients ?? new())
+                                {
+                                    <option value="@client.Id">@client.Hostname (@client.IpAddress)</option>
+                                }
+                            </select>
+                            <small class="form-text text-muted">Ausgewählt: @bulkAssignment.ClientIds.Count Clients</small>
+                        </div>
+                    }
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <InputCheckbox class="form-check-input" @bind-Value="bulkAssignment.IsDefaultPrinter" />
+                            <label class="form-check-label">Als Standarddrucker festlegen</label>
+                        </div>
                     </div>
                 }
                 else
                 {
                     <div class="mb-3">
-                        <label class="form-label">Client:</label>
-                        <InputSelect class="form-control" @bind-Value="newAssignment.ClientId">
-                            <option value="">-- Client auswählen --</option>
-                            @foreach (var client in clients ?? new())
+                        <label class="form-label">Drucker:</label>
+                        <InputSelect class="form-control" @bind-Value="newAssignment.PrinterId">
+                            <option value="0">-- Drucker auswählen --</option>
+                            @foreach (var printer in printers ?? new())
                             {
-                                <option value="@client.Id">@client.Hostname (@client.IpAddress)</option>
+                                <option value="@printer.Id">@printer.Name (@printer.SharePath)</option>
                             }
                         </InputSelect>
                     </div>
-                }
-                <div class="mb-3">
-                    <div class="form-check">
-                        <InputCheckbox class="form-check-input" @bind-Value="newAssignment.IsDefaultPrinter" />
-                        <label class="form-check-label">Als Standarddrucker festlegen</label>
+                    <div class="mb-3">
+                        <label class="form-label">Zuweisungstyp:</label>
+                        <InputSelect class="form-control" @bind-Value="newAssignment.AssignmentType" @oninput="OnAssignmentTypeChanged">
+                            <option value="User">Benutzer</option>
+                            <option value="Client">Client</option>
+                        </InputSelect>
                     </div>
-                </div>
+                    @if (newAssignment.AssignmentType == "User")
+                    {
+                        <div class="mb-3">
+                            <label class="form-label">Benutzer:</label>
+                            <InputSelect class="form-control" @bind-Value="newAssignment.UserId">
+                                <option value="">-- Benutzer auswählen --</option>
+                                @foreach (var user in users ?? new())
+                                {
+                                    <option value="@user.Id">@user.UserPrincipalName</option>
+                                }
+                            </InputSelect>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="mb-3">
+                            <label class="form-label">Client:</label>
+                            <InputSelect class="form-control" @bind-Value="newAssignment.ClientId">
+                                <option value="">-- Client auswählen --</option>
+                                @foreach (var client in clients ?? new())
+                                {
+                                    <option value="@client.Id">@client.Hostname (@client.IpAddress)</option>
+                                }
+                            </InputSelect>
+                        </div>
+                    }
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <InputCheckbox class="form-check-input" @bind-Value="newAssignment.IsDefaultPrinter" />
+                            <label class="form-check-label">Als Standarddrucker festlegen</label>
+                        </div>
+                    </div>
+                }
                 <button type="submit" class="btn btn-success">Zuweisung erstellen</button>
                 <button type="button" class="btn btn-secondary" @onclick="() => showAddAssignmentForm = false">Abbrechen</button>
             </EditForm>
@@ -94,6 +168,7 @@ else
         <thead>
             <tr>
                 <th>Drucker</th>
+                <th>Servicenummer</th>
                 <th>Typ</th>
                 <th>Zugewiesen an</th>
                 <th>Standarddrucker</th>
@@ -101,10 +176,11 @@ else
             </tr>
         </thead>
         <tbody>
-            @foreach (var assignment in assignments)
+            @foreach (var assignment in FilteredAssignments)
             {
                 <tr>
                     <td>@assignment.PrinterName</td>
+                    <td>@(assignment.ServiceNumber ?? "-")</td>
                     <td>
                         <span class="badge bg-@(assignment.AssignmentType == "User" ? "primary" : "info")">
                             @assignment.AssignmentType
@@ -146,11 +222,58 @@ else
     private List<UserInfo>? users;
     private List<ClientInfo>? clients;
     private bool showAddAssignmentForm = false;
+    private bool isBulkMode = false;
     private CreateAssignmentDto newAssignment = new() { AssignmentType = "User" };
+    private BulkAssignmentDto bulkAssignment = new() { AssignmentType = "User" };
+    private string searchText = "";
+    private string filterType = "";
+
+    private IEnumerable<AssignmentDto> FilteredAssignments
+    {
+        get
+        {
+            if (assignments == null) return new List<AssignmentDto>();
+
+            var filtered = assignments.AsEnumerable();
+
+            // Apply type filter
+            if (!string.IsNullOrWhiteSpace(filterType))
+            {
+                filtered = filtered.Where(a => a.AssignmentType == filterType);
+            }
+
+            // Apply search filter
+            if (!string.IsNullOrWhiteSpace(searchText))
+            {
+                var search = searchText.ToLower();
+                filtered = filtered.Where(a =>
+                    a.PrinterName.ToLower().Contains(search) ||
+                    (a.ServiceNumber != null && a.ServiceNumber.ToLower().Contains(search)) ||
+                    (a.UserPrincipalName != null && a.UserPrincipalName.ToLower().Contains(search)) ||
+                    (a.ClientHostname != null && a.ClientHostname.ToLower().Contains(search)));
+            }
+
+            return filtered;
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
         await LoadData();
+
+        // Check for query parameters
+        var uri = new Uri(Navigation.Uri);
+        var queryParams = QueryHelpers.ParseQuery(uri.Query);
+
+        if (queryParams.TryGetValue("search", out var searchValue))
+        {
+            searchText = searchValue.ToString();
+        }
+
+        if (queryParams.TryGetValue("type", out var typeValue))
+        {
+            filterType = typeValue.ToString();
+        }
     }
 
     private async Task LoadData()
@@ -164,7 +287,9 @@ else
     private void ShowAddForm()
     {
         showAddAssignmentForm = true;
+        isBulkMode = false;
         newAssignment = new() { AssignmentType = "User" };
+        bulkAssignment = new() { AssignmentType = "User" };
     }
 
     private void OnAssignmentTypeChanged(ChangeEventArgs e)
@@ -173,9 +298,46 @@ else
         newAssignment.ClientId = null;
     }
 
+    private void OnBulkAssignmentTypeChanged(ChangeEventArgs e)
+    {
+        bulkAssignment.UserIds.Clear();
+        bulkAssignment.ClientIds.Clear();
+    }
+
+    private void OnPrintersSelected(ChangeEventArgs e)
+    {
+        if (e.Value is string[] selectedValues)
+        {
+            bulkAssignment.PrinterIds = selectedValues.Select(int.Parse).ToList();
+        }
+    }
+
+    private void OnUsersSelected(ChangeEventArgs e)
+    {
+        if (e.Value is string[] selectedValues)
+        {
+            bulkAssignment.UserIds = selectedValues.Select(int.Parse).ToList();
+        }
+    }
+
+    private void OnClientsSelected(ChangeEventArgs e)
+    {
+        if (e.Value is string[] selectedValues)
+        {
+            bulkAssignment.ClientIds = selectedValues.Select(int.Parse).ToList();
+        }
+    }
+
     private async Task AddAssignment()
     {
-        await ApiService.CreateAssignmentAsync(newAssignment);
+        if (isBulkMode)
+        {
+            await ApiService.CreateBulkAssignmentsAsync(bulkAssignment);
+        }
+        else
+        {
+            await ApiService.CreateAssignmentAsync(newAssignment);
+        }
         showAddAssignmentForm = false;
         await LoadData();
     }

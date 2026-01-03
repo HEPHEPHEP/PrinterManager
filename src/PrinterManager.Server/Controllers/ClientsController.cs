@@ -69,4 +69,28 @@ public class ClientsController : ControllerBase
 
         return Ok(users);
     }
+
+    [HttpDelete("{id}")]
+    public async Task<ActionResult> DeleteClient(int id)
+    {
+        var client = await _context.Clients.FindAsync(id);
+        if (client == null)
+            return NotFound();
+
+        _context.Clients.Remove(client);
+        await _context.SaveChangesAsync();
+        return NoContent();
+    }
+
+    [HttpDelete("users/{id}")]
+    public async Task<ActionResult> DeleteUser(int id)
+    {
+        var user = await _context.Users.FindAsync(id);
+        if (user == null)
+            return NotFound();
+
+        _context.Users.Remove(user);
+        await _context.SaveChangesAsync();
+        return NoContent();
+    }
 }

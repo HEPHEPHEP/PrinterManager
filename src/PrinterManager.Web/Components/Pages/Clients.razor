@@ -3,6 +3,7 @@
 @inject IApiService ApiService
 @inject AuthStateService AuthState
 @inject NavigationManager Navigation
+@inject IJSRuntime JSRuntime
 
 <PageTitle>Clients</PageTitle>
 
@@ -32,13 +33,21 @@ else
                 <th>Betriebssystem</th>
                 <th>Status</th>
                 <th>Zuletzt gesehen</th>
+                @if (AuthState.IsAdmin)
+                {
+                    <th>Aktionen</th>
+                }
             </tr>
         </thead>
         <tbody>
             @foreach (var client in clients)
             {
                 <tr>
-                    <td>@client.Hostname</td>
+                    <td>
+                        <a href="@($"/assignments?search={Uri.EscapeDataString(client.Hostname)}&type=Client")" class="text-decoration-none">
+                            @client.Hostname
+                        </a>
+                    </td>
                     <td>@client.IpAddress</td>
                     <td>@client.OperatingSystem</td>
                     <td>
@@ -52,6 +61,12 @@ else
                         }
                     </td>
                     <td>@client.LastSeen.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss")</td>
+                    @if (AuthState.IsAdmin)
+                    {
+                        <td>
+                            <button class="btn btn-danger btn-sm" @onclick="() => DeleteClient(client.Id)">Löschen</button>
+                        </td>
+                    }
                 </tr>
             }
         </tbody>
@@ -64,6 +79,24 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        await LoadClients();
+    }
+
+    private async Task LoadClients()
+    {
         clients = await ApiService.GetClientsAsync();
+    }
+
+    private async Task DeleteClient(int id)
+    {
+        var confirmed = await JSRuntime.InvokeAsync<bool>("confirm", "Möchten Sie diesen Client wirklich löschen?");
+        if (confirmed)
+        {
+            var success = await ApiService.DeleteClientAsync(id);
+            if (success)
+            {
+                await LoadClients();
+            }
+        }
     }
 }
