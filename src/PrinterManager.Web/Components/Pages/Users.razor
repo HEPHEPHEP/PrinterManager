@@ -1,9 +1,16 @@
 @page "/users"
 @inject IApiService ApiService
 @inject AuthStateService AuthState
+@inject NavigationManager Navigation
 
 <PageTitle>Benutzerverwaltung</PageTitle>
 
+@if (!AuthState.IsAuthenticated)
+{
+    Navigation.NavigateTo("/login");
+}
+else
+{
 <h1>Benutzerverwaltung</h1>
 
 @if (AuthState.Role != "Administrator")
@@ -119,6 +126,7 @@ else
             </tbody>
         </table>
     }
+}
 }
 
 @code {

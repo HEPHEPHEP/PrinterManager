@@ -1,8 +1,16 @@
 @page "/printers"
 @inject IApiService ApiService
+@inject AuthStateService AuthState
+@inject NavigationManager Navigation
 
 <PageTitle>Drucker</PageTitle>
 
+@if (!AuthState.IsAuthenticated)
+{
+    Navigation.NavigateTo("/login");
+}
+else
+{
 <h1>Drucker verwalten</h1>
 
 <div class="mb-3">
@@ -141,6 +149,7 @@ else
         </div>
     </div>
     <div class="modal-backdrop show"></div>
+}
 }
 
 @code {

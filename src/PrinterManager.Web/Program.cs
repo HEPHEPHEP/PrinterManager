@@ -8,7 +8,6 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
 builder.Services.AddHttpClient<IApiService, ApiService>();
-builder.Services.AddScoped<IApiService, ApiService>();
 builder.Services.AddSingleton<AuthStateService>();
 
 var app = builder.Build();

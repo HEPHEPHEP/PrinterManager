@@ -1,8 +1,16 @@
 @page "/assignments"
 @inject IApiService ApiService
+@inject AuthStateService AuthState
+@inject NavigationManager Navigation
 
 <PageTitle>Zuweisungen</PageTitle>
 
+@if (!AuthState.IsAuthenticated)
+{
+    Navigation.NavigateTo("/login");
+}
+else
+{
 <h1>Druckerzuweisungen verwalten</h1>
 
 <div class="mb-3">
@@ -128,6 +136,7 @@ else
             }
         </tbody>
     </table>
+}
 }
 
 @code {

@@ -1,9 +1,16 @@
 @page "/security"
 @inject IApiService ApiService
 @inject AuthStateService AuthState
+@inject NavigationManager Navigation
 
 <PageTitle>Sicherheitseinstellungen</PageTitle>
 
+@if (!AuthState.IsAuthenticated)
+{
+    Navigation.NavigateTo("/login");
+}
+else
+{
 <h1>Sicherheitseinstellungen</h1>
 
 @if (AuthState.Role != "Administrator")
@@ -242,6 +249,7 @@ else
             </div>
         }
     }
+}
 }
 
 @code {

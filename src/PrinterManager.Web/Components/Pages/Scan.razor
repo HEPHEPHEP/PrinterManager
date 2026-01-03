@@ -1,8 +1,16 @@
 @page "/scan"
 @inject IApiService ApiService
+@inject AuthStateService AuthState
+@inject NavigationManager Navigation
 
 <PageTitle>Druckerserver scannen</PageTitle>
 
+@if (!AuthState.IsAuthenticated)
+{
+    Navigation.NavigateTo("/login");
+}
+else
+{
 <h1>Druckerserver scannen</h1>
 
 <div class="card mb-3">
@@ -80,6 +88,7 @@ else if (scannedPrinters != null)
 @if (!string.IsNullOrEmpty(message))
 {
     <div class="alert alert-success mt-3">@message</div>
+}
 }
 
 @code {

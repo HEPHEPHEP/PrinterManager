@@ -30,17 +30,17 @@ public class LdapService : ILdapService
 
     public async Task<bool> IsEnabledAsync()
     {
-        var config = await _context.LdapConfigurations.FirstAsync();
-        return config.Enabled;
+        var config = await _context.LdapConfigurations.FirstOrDefaultAsync();
+        return config?.Enabled ?? false;
     }
 
     public async Task<LdapAuthResult> AuthenticateAsync(string username, string password)
     {
         return await Task.Run(async () =>
         {
-            var config = await _context.LdapConfigurations.FirstAsync();
+            var config = await _context.LdapConfigurations.FirstOrDefaultAsync();
 
-            if (!config.Enabled)
+            if (config == null || !config.Enabled)
             {
                 return new LdapAuthResult
                 {

@@ -1,8 +1,16 @@
 @page "/configuration"
 @inject IApiService ApiService
+@inject AuthStateService AuthState
+@inject NavigationManager Navigation
 
 <PageTitle>Konfiguration</PageTitle>
 
+@if (!AuthState.IsAuthenticated)
+{
+    Navigation.NavigateTo("/login");
+}
+else
+{
 <h1>Systemkonfiguration</h1>
 
 @if (config == null)
@@ -96,6 +104,7 @@ else
             </ul>
         </div>
     </div>
+}
 }
 
 @code {

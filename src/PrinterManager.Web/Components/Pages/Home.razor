@@ -1,9 +1,17 @@
 @page "/"
 @inject IApiService ApiService
+@inject AuthStateService AuthState
+@inject NavigationManager Navigation
 
 <PageTitle>Übersicht</PageTitle>
 
-<h1>Windows Printer Manager</h1>
+@if (!AuthState.IsAuthenticated)
+{
+    Navigation.NavigateTo("/login");
+}
+else
+{
+    <h1>Windows Printer Manager</h1>
 
 <div class="row mt-4">
     <div class="col-md-3">
