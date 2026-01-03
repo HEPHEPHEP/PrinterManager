@@ -7,14 +7,17 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
+builder.Services.AddSingleton<AuthStateService>();
+builder.Services.AddScoped<AuthTokenHandler>();
+
 builder.Services.AddHttpClient<IApiService, ApiService>((serviceProvider, client) =>
 {
     var config = serviceProvider.GetRequiredService<IConfiguration>();
     var apiUrl = config["ApiUrl"] ?? "http://localhost:5000";
     client.BaseAddress = new Uri(apiUrl);
     Console.WriteLine($"Configuring HttpClient with BaseAddress: {apiUrl}");
-});
-builder.Services.AddSingleton<AuthStateService>();
+})
+.AddHttpMessageHandler<AuthTokenHandler>();
 
 var app = builder.Build();
 

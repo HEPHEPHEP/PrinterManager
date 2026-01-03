@@ -64,7 +64,6 @@
 
             if (result.Success && result.Token != null)
             {
-                ApiService.SetAuthToken(result.Token);
                 AuthState.SetAuthInfo(result.Token, result.Username ?? "", result.Role ?? "");
                 Navigation.NavigateTo("/");
             }

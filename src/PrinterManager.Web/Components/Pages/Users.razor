@@ -1,9 +1,10 @@
 @page "/users"
+@rendermode InteractiveServer
 @inject IApiService ApiService
 @inject AuthStateService AuthState
 @inject NavigationManager Navigation
 
-<PageTitle>Benutzerverwaltung</PageTitle>
+<PageTitle>Benutzer</PageTitle>
 
 @if (!AuthState.IsAuthenticated)
 {
@@ -11,179 +12,56 @@
 }
 else
 {
-<h1>Benutzerverwaltung</h1>
+<h1>Registrierte Benutzer</h1>
 
-@if (AuthState.Role != "Administrator")
+@if (users == null)
 {
-    <div class="alert alert-danger">Nur Administratoren haben Zugriff auf diese Seite.</div>
+    <p><em>Laden...</em></p>
+}
+else if (!users.Any())
+{
+    <p>Keine Benutzer registriert.</p>
 }
 else
 {
-    <div class="mb-3">
-        <button class="btn btn-primary" @onclick="ShowAddUserForm">Neuer Benutzer</button>
-    </div>
-
-    @if (showAddForm)
-    {
-        <div class="card mb-3">
-            <div class="card-body">
-                <h5 class="card-title">Neuen Benutzer hinzufügen</h5>
-                <EditForm Model="@newUser" OnValidSubmit="AddUser">
-                    <div class="mb-3">
-                        <label class="form-label">Benutzername:</label>
-                        <InputText class="form-control" @bind-Value="newUser.Username" />
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Passwort:</label>
-                        <InputText type="password" class="form-control" @bind-Value="newUser.Password" />
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">E-Mail:</label>
-                        <InputText class="form-control" @bind-Value="newUser.Email" />
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Vollständiger Name:</label>
-                        <InputText class="form-control" @bind-Value="newUser.FullName" />
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Rolle:</label>
-                        <InputSelect class="form-control" @bind-Value="newUser.Role">
-                            <option value="User">Benutzer</option>
-                            <option value="Administrator">Administrator</option>
-                        </InputSelect>
-                    </div>
-                    <button type="submit" class="btn btn-success">Hinzufügen</button>
-                    <button type="button" class="btn btn-secondary" @onclick="() => showAddForm = false">Abbrechen</button>
-                </EditForm>
-            </div>
-        </div>
-    }
-
-    @if (users == null)
-    {
-        <p><em>Laden...</em></p>
-    }
-    else if (!users.Any())
-    {
-        <p>Keine Benutzer vorhanden.</p>
-    }
-    else
-    {
-        <table class="table table-striped">
-            <thead>
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>UserPrincipalName</th>
+                <th>Anzeigename</th>
+                <th>Status</th>
+                <th>Zuletzt gesehen</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var user in users)
+            {
                 <tr>
-                    <th>Benutzername</th>
-                    <th>E-Mail</th>
-                    <th>Vollständiger Name</th>
-                    <th>Rolle</th>
-                    <th>Status</th>
-                    <th>LDAP</th>
-                    <th>Letzte Anmeldung</th>
-                    <th>Aktionen</th>
+                    <td>@user.UserPrincipalName</td>
+                    <td>@(user.DisplayName ?? "-")</td>
+                    <td>
+                        @if (user.IsActive)
+                        {
+                            <span class="badge bg-success">Aktiv</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-secondary">Inaktiv</span>
+                        }
+                    </td>
+                    <td>@user.LastSeen.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss")</td>
                 </tr>
-            </thead>
-            <tbody>
-                @foreach (var user in users)
-                {
-                    <tr>
-                        <td>@user.Username</td>
-                        <td>@(user.Email ?? "-")</td>
-                        <td>@(user.FullName ?? "-")</td>
-                        <td>
-                            <span class="badge bg-@(user.Role == "Administrator" ? "danger" : "primary")">
-                                @user.Role
-                            </span>
-                        </td>
-                        <td>
-                            @if (user.IsActive)
-                            {
-                                <span class="badge bg-success">Aktiv</span>
-                            }
-                            else
-                            {
-                                <span class="badge bg-secondary">Inaktiv</span>
-                            }
-                        </td>
-                        <td>
-                            @if (user.IsLdapUser)
-                            {
-                                <span class="badge bg-info">LDAP</span>
-                            }
-                            else
-                            {
-                                <span class="badge bg-secondary">Lokal</span>
-                            }
-                        </td>
-                        <td>@(user.LastLogin?.ToLocalTime().ToString("dd.MM.yyyy HH:mm") ?? "-")</td>
-                        <td>
-                            @if (!user.IsLdapUser && user.Id != 1)
-                            {
-                                <button class="btn btn-sm btn-danger" @onclick="() => DeleteUser(user.Id)">Löschen</button>
-                            }
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </table>
-    }
+            }
+        </tbody>
+    </table>
 }
 }
 
 @code {
-    private List<UserDto>? users;
-    private bool showAddForm = false;
-    private RegisterUserDto newUser = new() { Username = "", Password = "" };
+    private List<UserInfo>? users;
 
     protected override async Task OnInitializedAsync()
     {
-        if (AuthState.Role == "Administrator")
-        {
-            await LoadUsers();
-        }
-    }
-
-    private async Task LoadUsers()
-    {
-        try
-        {
-            users = await ApiService.GetAppUsersAsync();
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error loading users: {ex.Message}");
-        }
-    }
-
-    private void ShowAddUserForm()
-    {
-        showAddForm = true;
-        newUser = new() { Username = "", Password = "", Role = "User" };
-    }
-
-    private async Task AddUser()
-    {
-        try
-        {
-            await ApiService.RegisterAppUserAsync(newUser);
-            showAddForm = false;
-            await LoadUsers();
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error adding user: {ex.Message}");
-        }
-    }
-
-    private async Task DeleteUser(int id)
-    {
-        try
-        {
-            await ApiService.DeleteAppUserAsync(id);
-            await LoadUsers();
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error deleting user: {ex.Message}");
-        }
+        users = await ApiService.GetUsersAsync();
     }
 }

@@ -1,9 +1,10 @@
 @page "/clients"
+@rendermode InteractiveServer
 @inject IApiService ApiService
 @inject AuthStateService AuthState
 @inject NavigationManager Navigation
 
-<PageTitle>Clients & Benutzer</PageTitle>
+<PageTitle>Clients</PageTitle>
 
 @if (!AuthState.IsAuthenticated)
 {
@@ -11,124 +12,58 @@
 }
 else
 {
-<h1>Clients & Benutzer</h1>
+<h1>Registrierte Clients</h1>
 
-<ul class="nav nav-tabs mb-3">
-    <li class="nav-item">
-        <a class="nav-link @(activeTab == "clients" ? "active" : "")" @onclick='() => activeTab = "clients"' style="cursor: pointer;">Clients</a>
-    </li>
-    <li class="nav-item">
-        <a class="nav-link @(activeTab == "users" ? "active" : "")" @onclick='() => activeTab = "users"' style="cursor: pointer;">Benutzer</a>
-    </li>
-</ul>
-
-@if (activeTab == "clients")
+@if (clients == null)
 {
-    <h3>Registrierte Clients</h3>
-    @if (clients == null)
-    {
-        <p><em>Laden...</em></p>
-    }
-    else if (!clients.Any())
-    {
-        <p>Keine Clients registriert.</p>
-    }
-    else
-    {
-        <table class="table table-striped">
-            <thead>
-                <tr>
-                    <th>Hostname</th>
-                    <th>IP-Adresse</th>
-                    <th>Betriebssystem</th>
-                    <th>Status</th>
-                    <th>Zuletzt gesehen</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var client in clients)
-                {
-                    <tr>
-                        <td>@client.Hostname</td>
-                        <td>@client.IpAddress</td>
-                        <td>@client.OperatingSystem</td>
-                        <td>
-                            @if (client.IsActive)
-                            {
-                                <span class="badge bg-success">Aktiv</span>
-                            }
-                            else
-                            {
-                                <span class="badge bg-secondary">Inaktiv</span>
-                            }
-                        </td>
-                        <td>@client.LastSeen.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss")</td>
-                    </tr>
-                }
-            </tbody>
-        </table>
-    }
+    <p><em>Laden...</em></p>
+}
+else if (!clients.Any())
+{
+    <p>Keine Clients registriert.</p>
 }
 else
 {
-    <h3>Registrierte Benutzer</h3>
-    @if (users == null)
-    {
-        <p><em>Laden...</em></p>
-    }
-    else if (!users.Any())
-    {
-        <p>Keine Benutzer registriert.</p>
-    }
-    else
-    {
-        <table class="table table-striped">
-            <thead>
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Hostname</th>
+                <th>IP-Adresse</th>
+                <th>Betriebssystem</th>
+                <th>Status</th>
+                <th>Zuletzt gesehen</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var client in clients)
+            {
                 <tr>
-                    <th>UserPrincipalName</th>
-                    <th>Anzeigename</th>
-                    <th>Status</th>
-                    <th>Zuletzt gesehen</th>
+                    <td>@client.Hostname</td>
+                    <td>@client.IpAddress</td>
+                    <td>@client.OperatingSystem</td>
+                    <td>
+                        @if (client.IsActive)
+                        {
+                            <span class="badge bg-success">Aktiv</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-secondary">Inaktiv</span>
+                        }
+                    </td>
+                    <td>@client.LastSeen.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss")</td>
                 </tr>
-            </thead>
-            <tbody>
-                @foreach (var user in users)
-                {
-                    <tr>
-                        <td>@user.UserPrincipalName</td>
-                        <td>@(user.DisplayName ?? "-")</td>
-                        <td>
-                            @if (user.IsActive)
-                            {
-                                <span class="badge bg-success">Aktiv</span>
-                            }
-                            else
-                            {
-                                <span class="badge bg-secondary">Inaktiv</span>
-                            }
-                        </td>
-                        <td>@user.LastSeen.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss")</td>
-                    </tr>
-                }
-            </tbody>
-        </table>
-    }
+            }
+        </tbody>
+    </table>
 }
 }
 
 @code {
-    private string activeTab = "clients";
     private List<ClientInfo>? clients;
-    private List<UserInfo>? users;
 
     protected override async Task OnInitializedAsync()
     {
-        await LoadData();
-    }
-
-    private async Task LoadData()
-    {
         clients = await ApiService.GetClientsAsync();
-        users = await ApiService.GetUsersAsync();
     }
 }
