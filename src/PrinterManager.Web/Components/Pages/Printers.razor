@@ -124,9 +124,12 @@ else
                             <label class="form-label">Ersatzdrucker:</label>
                             <InputSelect class="form-control" @bind-Value="updateDto.ReplacementPrinterId">
                                 <option value="0">-- Kein Ersatzdrucker --</option>
-                                @foreach (var p in printers.Where(p => p.Id != editingPrinter.Id))
+                                @if (printers != null)
                                 {
-                                    <option value="@p.Id">@p.Name</option>
+                                    @foreach (var p in printers.Where(p => p.Id != editingPrinter.Id))
+                                    {
+                                        <option value="@p.Id">@p.Name</option>
+                                    }
                                 }
                             </InputSelect>
                         </div>

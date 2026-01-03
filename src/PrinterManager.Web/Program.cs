@@ -1,3 +1,4 @@
+using PrinterManager.Web.Components;
 using PrinterManager.Web.Services;
 
 var builder = WebApplication.CreateBuilder(args);
