@@ -11,7 +11,7 @@ Der Windows Printer Manager ermöglicht die zentrale Verwaltung von Netzwerkdruc
 3. **Web Application** - Blazor Server UI für Verwaltung
 <img width="1909" height="495" alt="grafik" src="https://github.com/user-attachments/assets/42c5f3a0-2820-4193-b557-a75516344973" />
 
-### Hauptfunktionen
+## Hauptfunktionen
 
 ### Druckerverwaltung
 - ✅ Drucker über eindeutige IDs verwalten
