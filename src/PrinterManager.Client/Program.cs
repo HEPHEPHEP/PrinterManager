@@ -8,6 +8,7 @@ builder.Services.AddWindowsService(options =>
     options.ServiceName = "PrinterManager Client";
 });
 
+builder.Services.AddSingleton<IUserSessionService, UserSessionService>();
 builder.Services.AddSingleton<IPrinterDetectionService, PrinterDetectionService>();
 builder.Services.AddSingleton<IPrinterManagementService, PrinterManagementService>();
 builder.Services.AddSingleton<IServerCommunicationService, ServerCommunicationService>();

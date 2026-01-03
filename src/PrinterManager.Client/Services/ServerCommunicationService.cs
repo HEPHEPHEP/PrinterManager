@@ -13,22 +13,29 @@ public interface IServerCommunicationService
 public class ServerCommunicationService : IServerCommunicationService
 {
     private readonly HttpClient _httpClient;
+    private readonly IUserSessionService _userSessionService;
     private readonly string _hostname;
-    private readonly string _userPrincipalName;
+    private string _userPrincipalName;
 
-    public ServerCommunicationService(IConfiguration configuration)
+    public ServerCommunicationService(
+        IConfiguration configuration,
+        IUserSessionService userSessionService)
     {
         var serverUrl = configuration["ServerUrl"] ?? "http://localhost:5000";
         _httpClient = new HttpClient { BaseAddress = new Uri(serverUrl) };
+        _userSessionService = userSessionService;
 
         _hostname = Environment.MachineName;
-        _userPrincipalName = WindowsIdentity.GetCurrent().Name;
+        _userPrincipalName = string.Empty; // Will be set dynamically
     }
 
     public async Task<PrinterActionsResponse?> RegisterAsync(List<InstalledPrinterDto> installedPrinters)
     {
         try
         {
+            // Get current logged-in user
+            _userPrincipalName = _userSessionService.GetLoggedInUser();
+
             var dto = new ClientRegistrationDto
             {
                 Hostname = _hostname,
@@ -54,6 +61,9 @@ public class ServerCommunicationService : IServerCommunicationService
     {
         try
         {
+            // Get current logged-in user
+            _userPrincipalName = _userSessionService.GetLoggedInUser();
+
             var response = await _httpClient.GetAsync(
                 $"/api/clients/actions?hostname={_hostname}&userPrincipalName={Uri.EscapeDataString(_userPrincipalName)}");
 
