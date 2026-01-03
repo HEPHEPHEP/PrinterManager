@@ -5,6 +5,7 @@ public class PrinterDto
     public int Id { get; set; }
     public required string PrinterId { get; set; }
     public required string Name { get; set; }
+    public string? ServiceNumber { get; set; }
     public required string SharePath { get; set; }
     public string? Description { get; set; }
     public string? Location { get; set; }
@@ -18,6 +19,7 @@ public class CreatePrinterDto
 {
     public required string PrinterId { get; set; }
     public required string Name { get; set; }
+    public string? ServiceNumber { get; set; }
     public required string SharePath { get; set; }
     public string? Description { get; set; }
     public string? Location { get; set; }
@@ -27,6 +29,7 @@ public class CreatePrinterDto
 public class UpdatePrinterDto
 {
     public string? Name { get; set; }
+    public string? ServiceNumber { get; set; }
     public string? Description { get; set; }
     public string? Location { get; set; }
     public bool? IsAvailable { get; set; }

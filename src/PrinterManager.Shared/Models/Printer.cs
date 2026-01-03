@@ -5,6 +5,7 @@ public class Printer
     public int Id { get; set; }
     public required string PrinterId { get; set; }
     public required string Name { get; set; }
+    public string? ServiceNumber { get; set; }
     public required string SharePath { get; set; }
     public string? Description { get; set; }
     public string? Location { get; set; }

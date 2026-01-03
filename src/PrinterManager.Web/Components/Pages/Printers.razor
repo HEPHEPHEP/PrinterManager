@@ -18,6 +18,11 @@ else
     <button class="btn btn-primary" @onclick="ShowAddPrinterForm">Neuer Drucker</button>
 </div>
 
+<div class="mb-3">
+    <InputText class="form-control" @bind-Value="searchText" @bind-Value:event="oninput"
+               placeholder="Suche nach Name, Servicenummer oder Standort..." />
+</div>
+
 @if (showAddForm)
 {
     <div class="card mb-3">
@@ -31,6 +36,10 @@ else
                 <div class="mb-3">
                     <label class="form-label">Name:</label>
                     <InputText class="form-control" @bind-Value="newPrinter.Name" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Servicenummer:</label>
+                    <InputText class="form-control" @bind-Value="newPrinter.ServiceNumber" />
                 </div>
                 <div class="mb-3">
                     <label class="form-label">Freigabepfad (SMB):</label>
@@ -69,6 +78,7 @@ else
         <thead>
             <tr>
                 <th>Name</th>
+                <th>Servicenummer</th>
                 <th>Freigabepfad</th>
                 <th>Standort</th>
                 <th>Status</th>
@@ -77,12 +87,13 @@ else
             </tr>
         </thead>
         <tbody>
-            @foreach (var printer in printers)
+            @foreach (var printer in FilteredPrinters)
             {
                 <tr>
                     <td>@printer.Name</td>
+                    <td>@(printer.ServiceNumber ?? "-")</td>
                     <td><code>@printer.SharePath</code></td>
-                    <td>@printer.Location</td>
+                    <td>@(printer.Location ?? "-")</td>
                     <td>
                         @if (printer.IsAvailable)
                         {
@@ -122,6 +133,10 @@ else
                             <InputText class="form-control" @bind-Value="updateDto.Name" />
                         </div>
                         <div class="mb-3">
+                            <label class="form-label">Servicenummer:</label>
+                            <InputText class="form-control" @bind-Value="updateDto.ServiceNumber" />
+                        </div>
+                        <div class="mb-3">
                             <label class="form-label">Beschreibung:</label>
                             <InputText class="form-control" @bind-Value="updateDto.Description" />
                         </div>
@@ -156,9 +171,25 @@ else
 @code {
     private List<PrinterDto>? printers;
     private bool showAddForm = false;
+    private string searchText = "";
     private CreatePrinterDto newPrinter = new() { PrinterId = "", Name = "", SharePath = "" };
     private PrinterDto? editingPrinter;
     private UpdatePrinterDto updateDto = new();
+
+    private IEnumerable<PrinterDto> FilteredPrinters
+    {
+        get
+        {
+            if (printers == null) return Enumerable.Empty<PrinterDto>();
+            if (string.IsNullOrWhiteSpace(searchText)) return printers;
+
+            var search = searchText.ToLower();
+            return printers.Where(p =>
+                p.Name.ToLower().Contains(search) ||
+                (p.ServiceNumber != null && p.ServiceNumber.ToLower().Contains(search)) ||
+                (p.Location != null && p.Location.ToLower().Contains(search)));
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -189,6 +220,7 @@ else
         updateDto = new UpdatePrinterDto
         {
             Name = printer.Name,
+            ServiceNumber = printer.ServiceNumber,
             Description = printer.Description,
             Location = printer.Location,
             ReplacementPrinterId = printer.ReplacementPrinterId

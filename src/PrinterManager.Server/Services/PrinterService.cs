@@ -35,6 +35,7 @@ public class PrinterService : IPrinterService
                 Id = p.Id,
                 PrinterId = p.PrinterId,
                 Name = p.Name,
+                ServiceNumber = p.ServiceNumber,
                 SharePath = p.SharePath,
                 Description = p.Description,
                 Location = p.Location,
@@ -60,6 +61,7 @@ public class PrinterService : IPrinterService
             Id = printer.Id,
             PrinterId = printer.PrinterId,
             Name = printer.Name,
+            ServiceNumber = printer.ServiceNumber,
             SharePath = printer.SharePath,
             Description = printer.Description,
             Location = printer.Location,
@@ -76,6 +78,7 @@ public class PrinterService : IPrinterService
         {
             PrinterId = dto.PrinterId,
             Name = dto.Name,
+            ServiceNumber = dto.ServiceNumber,
             SharePath = dto.SharePath,
             Description = dto.Description,
             Location = dto.Location,
@@ -91,6 +94,7 @@ public class PrinterService : IPrinterService
             Id = printer.Id,
             PrinterId = printer.PrinterId,
             Name = printer.Name,
+            ServiceNumber = printer.ServiceNumber,
             SharePath = printer.SharePath,
             Description = printer.Description,
             Location = printer.Location,
@@ -110,6 +114,8 @@ public class PrinterService : IPrinterService
 
         if (dto.Name != null)
             printer.Name = dto.Name;
+        if (dto.ServiceNumber != null)
+            printer.ServiceNumber = dto.ServiceNumber;
         if (dto.Description != null)
             printer.Description = dto.Description;
         if (dto.Location != null)
