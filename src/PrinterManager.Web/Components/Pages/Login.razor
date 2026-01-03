@@ -1,0 +1,86 @@
+@page "/login"
+@inject IApiService ApiService
+@inject AuthStateService AuthState
+@inject NavigationManager Navigation
+
+<PageTitle>Login</PageTitle>
+
+<div class="row justify-content-center mt-5">
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body">
+                <h3 class="card-title text-center mb-4">PrinterManager Login</h3>
+
+                @if (!string.IsNullOrEmpty(errorMessage))
+                {
+                    <div class="alert alert-danger">@errorMessage</div>
+                }
+
+                <EditForm Model="@loginDto" OnValidSubmit="HandleLogin">
+                    <div class="mb-3">
+                        <label class="form-label">Benutzername:</label>
+                        <InputText class="form-control" @bind-Value="loginDto.Username" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Passwort:</label>
+                        <InputText type="password" class="form-control" @bind-Value="loginDto.Password" />
+                    </div>
+                    <div class="mb-3 form-check">
+                        <InputCheckbox class="form-check-input" @bind-Value="loginDto.UseLdap" />
+                        <label class="form-check-label">LDAP verwenden</label>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100" disabled="@isLoggingIn">
+                        @if (isLoggingIn)
+                        {
+                            <span>Anmeldung...</span>
+                        }
+                        else
+                        {
+                            <span>Anmelden</span>
+                        }
+                    </button>
+                </EditForm>
+
+                <div class="mt-3 text-center text-muted">
+                    <small>Standard-Login: admin / admin</small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private LoginDto loginDto = new() { Username = "", Password = "" };
+    private string errorMessage = "";
+    private bool isLoggingIn = false;
+
+    private async Task HandleLogin()
+    {
+        isLoggingIn = true;
+        errorMessage = "";
+
+        try
+        {
+            var result = await ApiService.LoginAsync(loginDto);
+
+            if (result.Success && result.Token != null)
+            {
+                ApiService.SetAuthToken(result.Token);
+                AuthState.SetAuthInfo(result.Token, result.Username ?? "", result.Role ?? "");
+                Navigation.NavigateTo("/");
+            }
+            else
+            {
+                errorMessage = result.Message ?? "Login fehlgeschlagen";
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Fehler: {ex.Message}";
+        }
+        finally
+        {
+            isLoggingIn = false;
+        }
+    }
+}

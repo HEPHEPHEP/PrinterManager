@@ -6,6 +6,14 @@ namespace PrinterManager.Web.Services;
 
 public interface IApiService
 {
+    void SetAuthToken(string token);
+
+    // Auth
+    Task<LoginResponseDto> LoginAsync(LoginDto dto);
+    Task<List<UserDto>> GetAppUsersAsync();
+    Task<UserDto> RegisterAppUserAsync(RegisterUserDto dto);
+    Task<bool> DeleteAppUserAsync(int id);
+
     // Printers
     Task<List<PrinterDto>> GetPrintersAsync();
     Task<PrinterDto?> GetPrinterAsync(int id);
@@ -40,6 +48,37 @@ public class ApiService : IApiService
         var serverUrl = configuration["ApiUrl"] ?? "http://localhost:5000";
         _httpClient = httpClient;
         _httpClient.BaseAddress = new Uri(serverUrl);
+    }
+
+    public void SetAuthToken(string token)
+    {
+        _httpClient.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+    }
+
+    // Auth
+    public async Task<LoginResponseDto> LoginAsync(LoginDto dto)
+    {
+        var response = await _httpClient.PostAsJsonAsync("/api/auth/login", dto);
+        return (await response.Content.ReadFromJsonAsync<LoginResponseDto>())!;
+    }
+
+    public async Task<List<UserDto>> GetAppUsersAsync()
+    {
+        return await _httpClient.GetFromJsonAsync<List<UserDto>>("/api/auth/users") ?? new List<UserDto>();
+    }
+
+    public async Task<UserDto> RegisterAppUserAsync(RegisterUserDto dto)
+    {
+        var response = await _httpClient.PostAsJsonAsync("/api/auth/register", dto);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<UserDto>())!;
+    }
+
+    public async Task<bool> DeleteAppUserAsync(int id)
+    {
+        var response = await _httpClient.DeleteAsync($"/api/auth/users/{id}");
+        return response.IsSuccessStatusCode;
     }
 
     // Printers

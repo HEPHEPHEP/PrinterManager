@@ -1,5 +1,6 @@
 using PrinterManager.Shared.DTOs;
 using System.Management;
+using System.Runtime.Versioning;
 
 namespace PrinterManager.Server.Services;
 
@@ -10,6 +11,7 @@ public interface IPrintServerScanService
 
 public class PrintServerScanService : IPrintServerScanService
 {
+    [SupportedOSPlatform("windows")]
     public async Task<List<ScannedPrinterDto>> ScanPrintServerAsync(PrintServerScanDto dto)
     {
         return await Task.Run(() =>

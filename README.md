@@ -36,6 +36,14 @@ Der Windows Printer Manager ermöglicht die zentrale Verwaltung von Netzwerkdruc
 - ✅ Automatische Zuweisung bei Nichtverfügbarkeit
 - ✅ Automatische Wiederherstellung bei Verfügbarkeit
 
+### Sicherheit & Authentifizierung
+- ✅ JWT-basierte Authentifizierung
+- ✅ Rollenbasierte Zugriffskontrolle (Administrator, Benutzer)
+- ✅ Optionale LDAP/Active Directory-Integration
+- ✅ HTTPS/SSL-Verschlüsselung
+- ✅ Passwort-Hashing (SHA256)
+- ✅ Benutzerverwaltung über Web-Interface
+
 ## Architektur
 
 ```
@@ -207,6 +215,12 @@ dotnet run --urls "http://0.0.0.0:5001"
 
 ## API-Endpunkte
 
+### Authentifizierung
+- `POST /api/auth/login` - Benutzer-Login (JWT Token)
+- `POST /api/auth/register` - Neuen Benutzer registrieren (nur Administrator)
+- `GET /api/auth/users` - Alle Benutzer auflisten (nur Administrator)
+- `DELETE /api/auth/users/{id}` - Benutzer löschen (nur Administrator)
+
 ### Drucker
 - `GET /api/printers` - Alle Drucker auflisten
 - `GET /api/printers/{id}` - Drucker Details
@@ -240,7 +254,8 @@ dotnet run --urls "http://0.0.0.0:5001"
 ### Tabellen
 - **Printers** - Verwaltete Drucker
 - **Clients** - Registrierte Client-Computer
-- **Users** - Registrierte Benutzer
+- **Users** - Registrierte Benutzer (Client-Registrierung)
+- **ApplicationUsers** - Web-Anwendungsbenutzer (Login)
 - **PrinterAssignments** - Zuweisungen (Benutzer/Client ↔ Drucker)
 - **ClientPrinters** - Auf Clients installierte Drucker
 - **SystemConfigurations** - Systemeinstellungen
@@ -270,13 +285,119 @@ dotnet run --urls "http://0.0.0.0:5001"
 4. Bei nächstem Poll installieren Clients den Ersatzdrucker
 5. Beim Reaktivieren werden Original-Zuweisungen wiederhergestellt
 
+## Sicherheitskonfiguration
+
+### Standard-Anmeldung
+- **Benutzername**: admin
+- **Passwort**: admin
+- **⚠️ WICHTIG**: Ändern Sie das Admin-Passwort sofort nach der ersten Anmeldung!
+
+### JWT-Konfiguration
+
+In `appsettings.json` des Servers:
+
+```json
+{
+  "Jwt": {
+    "Key": "IHR_GEHEIMER_SCHLÜSSEL_MINDESTENS_32_ZEICHEN_LANG",
+    "Issuer": "PrinterManager",
+    "Audience": "PrinterManager"
+  }
+}
+```
+
+**⚠️ WICHTIG**: Ändern Sie den JWT-Key in Produktivumgebungen!
+
+### LDAP-Konfiguration
+
+Optionale LDAP/Active Directory-Integration in `appsettings.json`:
+
+```json
+{
+  "Ldap": {
+    "Enabled": true,
+    "Server": "ldap.ihrefirma.de",
+    "Port": 389,
+    "BaseDn": "dc=ihrefirma,dc=de",
+    "UserDnTemplate": "uid={0},ou=users,dc=ihrefirma,dc=de"
+  }
+}
+```
+
+**Hinweis**: Bei LDAP-Authentifizierung werden Benutzer automatisch im System angelegt.
+
+### HTTPS/SSL
+
+Der Server läuft standardmäßig auf:
+- **HTTP**: Port 5000
+- **HTTPS**: Port 5443
+
+Für Produktivumgebungen:
+
+1. Eigenes SSL-Zertifikat erstellen:
+```bash
+dotnet dev-certs https --export-path ./certificate.pfx --password IhrPasswort
+```
+
+2. Konfiguration in `appsettings.json`:
+```json
+{
+  "Kestrel": {
+    "Endpoints": {
+      "Https": {
+        "Url": "https://*:5443",
+        "Certificate": {
+          "Path": "./certificate.pfx",
+          "Password": "IhrPasswort"
+        }
+      }
+    }
+  }
+}
+```
+
+### Rollenbasierte Zugriffskontrolle
+
+Zwei Benutzerrollen verfügbar:
+
+1. **Administrator**
+   - Vollzugriff auf alle Funktionen
+   - Benutzerverwaltung
+   - Systemkonfiguration
+   - Drucker- und Zuweisungsverwaltung
+
+2. **Benutzer**
+   - Lesezugriff auf Drucker und Zuweisungen
+   - Kein Zugriff auf Benutzerverwaltung
+   - Keine Systemkonfiguration
+
+### API-Authentifizierung
+
+Alle API-Endpunkte (außer `/api/auth/login`) erfordern einen gültigen JWT-Token:
+
+```bash
+curl -H "Authorization: Bearer YOUR_JWT_TOKEN" https://server:5443/api/printers
+```
+
+### Swagger/OpenAPI
+
+Swagger UI verfügbar unter: `https://server:5443/swagger`
+
+JWT-Token im Swagger UI verwenden:
+1. Klicken Sie auf "Authorize"
+2. Geben Sie ein: `Bearer YOUR_JWT_TOKEN`
+3. Klicken Sie auf "Authorize"
+
 ## Sicherheitshinweise
 
-- 🔒 In Produktivumgebungen HTTPS verwenden
-- 🔒 Authentifizierung/Autorisierung implementieren
-- 🔒 Client-Server-Kommunikation verschlüsseln
-- 🔒 Datenbankzugriff absichern
-- 🔒 PowerShell Execution Policy beachten
+- 🔒 **HTTPS verwenden**: In Produktivumgebungen nur HTTPS aktivieren
+- 🔒 **JWT-Key ändern**: Standard-Key muss geändert werden
+- 🔒 **Admin-Passwort ändern**: Sofort nach Installation
+- 🔒 **Firewall-Regeln**: Nur notwendige Ports öffnen
+- 🔒 **Client-Kommunikation**: Client-API sollte nur intern erreichbar sein
+- 🔒 **Datenbankzugriff**: SQLite-Datei mit Dateisystemberechtigungen schützen
+- 🔒 **LDAP-Verbindung**: LDAPS (Port 636) für verschlüsselte Verbindungen verwenden
+- 🔒 **Regelmäßige Updates**: .NET und Abhängigkeiten aktuell halten
 
 ## Lizenz
 

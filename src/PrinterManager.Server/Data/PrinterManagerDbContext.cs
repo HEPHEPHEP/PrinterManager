@@ -16,6 +16,7 @@ public class PrinterManagerDbContext : DbContext
     public DbSet<PrinterAssignment> PrinterAssignments => Set<PrinterAssignment>();
     public DbSet<ClientPrinter> ClientPrinters => Set<ClientPrinter>();
     public DbSet<SystemConfiguration> SystemConfigurations => Set<SystemConfiguration>();
+    public DbSet<ApplicationUser> ApplicationUsers => Set<ApplicationUser>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -72,10 +73,10 @@ public class PrinterManagerDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade);
 
             // Ensure either UserId or ClientId is set, but not both
-            entity.HasCheckConstraint(
+            entity.ToTable(t => t.HasCheckConstraint(
                 "CK_PrinterAssignment_UserOrClient",
                 "(UserId IS NOT NULL AND ClientId IS NULL) OR (UserId IS NULL AND ClientId IS NOT NULL)"
-            );
+            ));
         });
 
         // ClientPrinter configuration
@@ -95,6 +96,14 @@ public class PrinterManagerDbContext : DbContext
             entity.HasKey(e => e.Id);
         });
 
+        // ApplicationUser configuration
+        modelBuilder.Entity<ApplicationUser>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.Username).IsUnique();
+            entity.Property(e => e.Username).IsRequired().HasMaxLength(100);
+        });
+
         // Seed default configuration
         modelBuilder.Entity<SystemConfiguration>().HasData(
             new SystemConfiguration
@@ -102,6 +111,20 @@ public class PrinterManagerDbContext : DbContext
                 Id = 1,
                 AssignmentPriority = AssignmentPriority.UserPriority,
                 AutoAssignReplacementPrinters = true
+            }
+        );
+
+        // Seed default admin user (password: admin)
+        modelBuilder.Entity<ApplicationUser>().HasData(
+            new ApplicationUser
+            {
+                Id = 1,
+                Username = "admin",
+                PasswordHash = "jGl25bVBBBW96Qi9Te4V37Fnqchz/Eu4qB9vKrRIqRg=", // SHA256 of "admin"
+                IsActive = true,
+                IsLdapUser = false,
+                Role = UserRole.Administrator,
+                CreatedAt = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             }
         );
     }
