@@ -89,10 +89,19 @@ else
                         </div>
                     }
                     <div class="mb-3">
-                        <div class="form-check">
-                            <InputCheckbox class="form-check-input" @bind-Value="bulkAssignment.IsDefaultPrinter" />
-                            <label class="form-check-label">Als Standarddrucker festlegen</label>
-                        </div>
+                        <label class="form-label">Standarddrucker (optional):</label>
+                        <InputSelect class="form-control" @bind-Value="bulkAssignment.DefaultPrinterId">
+                            <option value="">-- Kein Standarddrucker --</option>
+                            @foreach (var printerId in bulkAssignment.PrinterIds)
+                            {
+                                var printer = printers?.FirstOrDefault(p => p.Id == printerId);
+                                if (printer != null)
+                                {
+                                    <option value="@printer.Id">@printer.Name</option>
+                                }
+                            }
+                        </InputSelect>
+                        <small class="form-text text-muted">Wählen Sie einen der ausgewählten Drucker als Standarddrucker</small>
                     </div>
                 }
                 else
@@ -309,6 +318,13 @@ else
         if (e.Value is string[] selectedValues)
         {
             bulkAssignment.PrinterIds = selectedValues.Select(int.Parse).ToList();
+
+            // Clear default printer if it's no longer in the selected list
+            if (bulkAssignment.DefaultPrinterId.HasValue &&
+                !bulkAssignment.PrinterIds.Contains(bulkAssignment.DefaultPrinterId.Value))
+            {
+                bulkAssignment.DefaultPrinterId = null;
+            }
         }
     }
 

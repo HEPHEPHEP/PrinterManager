@@ -88,6 +88,55 @@ public class AssignmentService : IAssignmentService
     {
         var assignmentType = Enum.Parse<AssignmentType>(dto.AssignmentType);
 
+        // Check if assignment already exists (duplicate check)
+        var existingAssignment = await _context.PrinterAssignments
+            .FirstOrDefaultAsync(a =>
+                a.PrinterId == dto.PrinterId &&
+                a.AssignmentType == assignmentType &&
+                a.UserId == dto.UserId &&
+                a.ClientId == dto.ClientId);
+
+        if (existingAssignment != null)
+        {
+            // Assignment already exists, just return it
+            var existing = await _context.PrinterAssignments
+                .Include(a => a.Printer)
+                .Include(a => a.User)
+                .Include(a => a.Client)
+                .FirstAsync(a => a.Id == existingAssignment.Id);
+
+            return new AssignmentDto
+            {
+                Id = existing.Id,
+                PrinterId = existing.PrinterId,
+                PrinterName = existing.Printer!.Name,
+                ServiceNumber = existing.Printer!.ServiceNumber,
+                AssignmentType = existing.AssignmentType.ToString(),
+                UserId = existing.UserId,
+                UserPrincipalName = existing.User?.UserPrincipalName,
+                ClientId = existing.ClientId,
+                ClientHostname = existing.Client?.Hostname,
+                IsDefaultPrinter = existing.IsDefaultPrinter
+            };
+        }
+
+        // If setting as default printer, unset existing default printer for this user/client
+        if (dto.IsDefaultPrinter)
+        {
+            var existingDefaults = await _context.PrinterAssignments
+                .Where(a =>
+                    a.IsDefaultPrinter &&
+                    a.AssignmentType == assignmentType &&
+                    a.UserId == dto.UserId &&
+                    a.ClientId == dto.ClientId)
+                .ToListAsync();
+
+            foreach (var defaultAssignment in existingDefaults)
+            {
+                defaultAssignment.IsDefaultPrinter = false;
+            }
+        }
+
         var assignment = new PrinterAssignment
         {
             PrinterId = dto.PrinterId,
@@ -124,21 +173,48 @@ public class AssignmentService : IAssignmentService
     public async Task<List<AssignmentDto>> CreateBulkAssignmentsAsync(BulkAssignmentDto dto)
     {
         var assignmentType = Enum.Parse<AssignmentType>(dto.AssignmentType);
-        var createdAssignments = new List<AssignmentDto>();
-
         var targetIds = assignmentType == AssignmentType.User ? dto.UserIds : dto.ClientIds;
 
-        foreach (var printerId in dto.PrinterIds)
+        foreach (var targetId in targetIds)
         {
-            foreach (var targetId in targetIds)
+            // If a default printer is specified, unset existing default printer for this user/client
+            if (dto.DefaultPrinterId.HasValue)
             {
+                var existingDefaults = await _context.PrinterAssignments
+                    .Where(a =>
+                        a.IsDefaultPrinter &&
+                        a.AssignmentType == assignmentType &&
+                        (assignmentType == AssignmentType.User ? a.UserId == targetId : a.ClientId == targetId))
+                    .ToListAsync();
+
+                foreach (var defaultAssignment in existingDefaults)
+                {
+                    defaultAssignment.IsDefaultPrinter = false;
+                }
+            }
+
+            foreach (var printerId in dto.PrinterIds)
+            {
+                // Check if assignment already exists (duplicate check)
+                var existingAssignment = await _context.PrinterAssignments
+                    .FirstOrDefaultAsync(a =>
+                        a.PrinterId == printerId &&
+                        a.AssignmentType == assignmentType &&
+                        (assignmentType == AssignmentType.User ? a.UserId == targetId : a.ClientId == targetId));
+
+                if (existingAssignment != null)
+                {
+                    // Skip duplicate assignment
+                    continue;
+                }
+
                 var assignment = new PrinterAssignment
                 {
                     PrinterId = printerId,
                     AssignmentType = assignmentType,
                     UserId = assignmentType == AssignmentType.User ? targetId : null,
                     ClientId = assignmentType == AssignmentType.Client ? targetId : null,
-                    IsDefaultPrinter = dto.IsDefaultPrinter
+                    IsDefaultPrinter = dto.DefaultPrinterId.HasValue && printerId == dto.DefaultPrinterId.Value
                 };
 
                 _context.PrinterAssignments.Add(assignment);

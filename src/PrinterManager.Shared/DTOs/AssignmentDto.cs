@@ -15,7 +15,7 @@ public class BulkAssignmentDto
     public string AssignmentType { get; set; } = "User"; // "User" or "Client"
     public List<int> UserIds { get; set; } = new();
     public List<int> ClientIds { get; set; } = new();
-    public bool IsDefaultPrinter { get; set; }
+    public int? DefaultPrinterId { get; set; } // ID of the printer to set as default (optional)
 }
 
 public class AssignmentDto
