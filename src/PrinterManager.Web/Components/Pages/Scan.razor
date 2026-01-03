@@ -47,6 +47,14 @@ else
 @if (scannedPrinters != null && scannedPrinters.Any())
 {
     <h3>Gefundene Drucker (@scannedPrinters.Count)</h3>
+
+    @if (newPrinters.Any())
+    {
+        <div class="alert alert-info">
+            <strong>@newPrinters.Count neue Drucker</strong> gefunden, @existingPrinters.Count bereits vorhanden
+        </div>
+    }
+
     <table class="table table-striped">
         <thead>
             <tr>
@@ -58,20 +66,39 @@ else
                 <th>Freigabepfad</th>
                 <th>Standort</th>
                 <th>Treiber</th>
+                <th>Status</th>
             </tr>
         </thead>
         <tbody>
             @foreach (var printer in scannedPrinters)
             {
-                <tr>
+                var isExisting = existingPrinterPaths.Contains(printer.SharePath);
+                <tr class="@(isExisting ? "table-secondary" : "")">
                     <td>
-                        <input type="checkbox" @bind="selectedPrinters[printer.SharePath]" />
+                        @if (!isExisting)
+                        {
+                            <input type="checkbox" @bind="selectedPrinters[printer.SharePath]" />
+                        }
+                        else
+                        {
+                            <input type="checkbox" disabled />
+                        }
                     </td>
                     <td>@printer.Name</td>
                     <td>@printer.ShareName</td>
                     <td><code>@printer.SharePath</code></td>
                     <td>@printer.Location</td>
                     <td>@printer.DriverName</td>
+                    <td>
+                        @if (isExisting)
+                        {
+                            <span class="badge bg-secondary">Bereits vorhanden</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-success">Neu</span>
+                        }
+                    </td>
                 </tr>
             }
         </tbody>
@@ -96,9 +123,16 @@ else if (scannedPrinters != null)
     private PrintServerScanDto scanDto = new() { ServerName = "" };
     private List<ScannedPrinterDto>? scannedPrinters;
     private Dictionary<string, bool> selectedPrinters = new();
+    private HashSet<string> existingPrinterPaths = new();
     private bool isScanning = false;
     private bool selectAll = false;
     private string message = "";
+
+    private List<ScannedPrinterDto> newPrinters =>
+        scannedPrinters?.Where(p => !existingPrinterPaths.Contains(p.SharePath)).ToList() ?? new();
+
+    private List<ScannedPrinterDto> existingPrinters =>
+        scannedPrinters?.Where(p => existingPrinterPaths.Contains(p.SharePath)).ToList() ?? new();
 
     private async Task ScanServer()
     {
@@ -107,7 +141,15 @@ else if (scannedPrinters != null)
         try
         {
             scannedPrinters = await ApiService.ScanPrintServerAsync(scanDto);
-            selectedPrinters = scannedPrinters.ToDictionary(p => p.SharePath, p => false);
+
+            // Load existing printers to check for duplicates
+            var existingPrinters = await ApiService.GetPrintersAsync();
+            existingPrinterPaths = existingPrinters.Select(p => p.SharePath).ToHashSet();
+
+            // Only select new printers by default
+            selectedPrinters = scannedPrinters
+                .Where(p => !existingPrinterPaths.Contains(p.SharePath))
+                .ToDictionary(p => p.SharePath, p => false);
         }
         catch (Exception ex)
         {
@@ -124,7 +166,10 @@ else if (scannedPrinters != null)
         selectAll = (bool)(e.Value ?? false);
         if (scannedPrinters != null)
         {
-            selectedPrinters = scannedPrinters.ToDictionary(p => p.SharePath, p => selectAll);
+            // Only toggle new printers
+            selectedPrinters = scannedPrinters
+                .Where(p => !existingPrinterPaths.Contains(p.SharePath))
+                .ToDictionary(p => p.SharePath, p => selectAll);
         }
     }
 
@@ -132,6 +177,7 @@ else if (scannedPrinters != null)
     {
         var toImport = scannedPrinters?
             .Where(p => selectedPrinters.ContainsKey(p.SharePath) && selectedPrinters[p.SharePath])
+            .Where(p => !existingPrinterPaths.Contains(p.SharePath)) // Extra safety check
             .ToList();
 
         if (toImport == null || !toImport.Any())
@@ -162,5 +208,6 @@ else if (scannedPrinters != null)
         message = $"{imported} von {toImport.Count} Druckern erfolgreich importiert.";
         scannedPrinters = null;
         selectedPrinters.Clear();
+        existingPrinterPaths.Clear();
     }
 }
