@@ -57,7 +57,9 @@
 
         try
         {
+            Console.WriteLine($"Attempting login with username: {loginDto.Username}");
             var result = await ApiService.LoginAsync(loginDto);
+            Console.WriteLine($"Login result: Success={result.Success}, Message={result.Message}");
 
             if (result.Success && result.Token != null)
             {
@@ -72,6 +74,7 @@
         }
         catch (Exception ex)
         {
+            Console.WriteLine($"Login exception: {ex}");
             errorMessage = $"Fehler: {ex.Message}";
         }
         finally

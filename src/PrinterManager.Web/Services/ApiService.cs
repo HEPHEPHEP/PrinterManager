@@ -50,11 +50,10 @@ public class ApiService : IApiService
 {
     private readonly HttpClient _httpClient;
 
-    public ApiService(HttpClient httpClient, IConfiguration configuration)
+    public ApiService(HttpClient httpClient)
     {
-        var serverUrl = configuration["ApiUrl"] ?? "http://localhost:5000";
         _httpClient = httpClient;
-        _httpClient.BaseAddress = new Uri(serverUrl);
+        Console.WriteLine($"ApiService created with BaseAddress: {_httpClient.BaseAddress}");
     }
 
     public void SetAuthToken(string token)
@@ -67,6 +66,18 @@ public class ApiService : IApiService
     public async Task<LoginResponseDto> LoginAsync(LoginDto dto)
     {
         var response = await _httpClient.PostAsJsonAsync("/api/auth/login", dto);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorContent = await response.Content.ReadAsStringAsync();
+            Console.WriteLine($"Login failed with status {response.StatusCode}: {errorContent}");
+            return new LoginResponseDto
+            {
+                Success = false,
+                Message = $"Server returned {response.StatusCode}: {errorContent}"
+            };
+        }
+
         return (await response.Content.ReadFromJsonAsync<LoginResponseDto>())!;
     }
 
