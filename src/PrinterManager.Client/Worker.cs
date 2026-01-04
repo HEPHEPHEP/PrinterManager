@@ -34,15 +34,8 @@ public class Worker : BackgroundService
         {
             try
             {
-                if (_isFirstRun)
-                {
-                    await InitialRegistrationAsync();
-                    _isFirstRun = false;
-                }
-                else
-                {
-                    await CheckForActionsAsync();
-                }
+                // Always register with current printer list to keep server updated
+                await RegisterAndProcessActionsAsync();
 
                 var pollInterval = _configuration.GetValue<int>("PollIntervalSeconds", 60);
                 await Task.Delay(TimeSpan.FromSeconds(pollInterval), stoppingToken);
@@ -55,9 +48,9 @@ public class Worker : BackgroundService
         }
     }
 
-    private async Task InitialRegistrationAsync()
+    private async Task RegisterAndProcessActionsAsync()
     {
-        _logger.LogInformation("Performing initial registration...");
+        _logger.LogInformation("Registering with server and checking for actions...");
 
         var installedPrinters = _printerDetection.GetInstalledPrinters();
         _logger.LogInformation($"Found {installedPrinters.Count} installed printers");
@@ -65,22 +58,21 @@ public class Worker : BackgroundService
         var response = await _serverCommunication.RegisterAsync(installedPrinters);
         if (response != null)
         {
-            _logger.LogInformation("Successfully registered with server");
-            await ProcessActionsAsync(response);
+            if (_isFirstRun)
+            {
+                _logger.LogInformation("Successfully registered with server");
+                _isFirstRun = false;
+            }
+
+            if (response.Actions.Any())
+            {
+                _logger.LogInformation($"Received {response.Actions.Count} actions from server");
+                await ProcessActionsAsync(response);
+            }
         }
         else
         {
             _logger.LogWarning("Failed to register with server");
-        }
-    }
-
-    private async Task CheckForActionsAsync()
-    {
-        var response = await _serverCommunication.GetActionsAsync();
-        if (response != null && response.Actions.Any())
-        {
-            _logger.LogInformation($"Received {response.Actions.Count} actions from server");
-            await ProcessActionsAsync(response);
         }
     }
 
