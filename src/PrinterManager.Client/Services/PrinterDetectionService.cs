@@ -1,5 +1,6 @@
 using System.Management;
 using PrinterManager.Shared.DTOs;
+using Microsoft.Extensions.Logging;
 
 namespace PrinterManager.Client.Services;
 
@@ -11,6 +12,12 @@ public interface IPrinterDetectionService
 
 public class PrinterDetectionService : IPrinterDetectionService
 {
+    private readonly ILogger<PrinterDetectionService> _logger;
+
+    public PrinterDetectionService(ILogger<PrinterDetectionService> logger)
+    {
+        _logger = logger;
+    }
     public List<InstalledPrinterDto> GetInstalledPrinters()
     {
         var printers = new List<InstalledPrinterDto>();
@@ -61,7 +68,7 @@ public class PrinterDetectionService : IPrinterDetectionService
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error detecting printers: {ex.Message}");
+            _logger.LogError(ex, "Error detecting printers");
         }
 
         return printers;
@@ -79,7 +86,7 @@ public class PrinterDetectionService : IPrinterDetectionService
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error getting default printer: {ex.Message}");
+            _logger.LogError(ex, "Error getting default printer");
         }
 
         return null;

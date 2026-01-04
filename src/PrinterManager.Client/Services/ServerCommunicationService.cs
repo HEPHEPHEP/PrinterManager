@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Security.Principal;
 using PrinterManager.Shared.DTOs;
+using Microsoft.Extensions.Logging;
 
 namespace PrinterManager.Client.Services;
 
@@ -14,16 +15,19 @@ public class ServerCommunicationService : IServerCommunicationService
 {
     private readonly HttpClient _httpClient;
     private readonly IUserSessionService _userSessionService;
+    private readonly ILogger<ServerCommunicationService> _logger;
     private readonly string _hostname;
     private string _userPrincipalName;
 
     public ServerCommunicationService(
         IConfiguration configuration,
-        IUserSessionService userSessionService)
+        IUserSessionService userSessionService,
+        ILogger<ServerCommunicationService> logger)
     {
         var serverUrl = configuration["ServerUrl"] ?? "http://localhost:5000";
         _httpClient = new HttpClient { BaseAddress = new Uri(serverUrl) };
         _userSessionService = userSessionService;
+        _logger = logger;
 
         _hostname = Environment.MachineName;
         _userPrincipalName = string.Empty; // Will be set dynamically
@@ -45,14 +49,17 @@ public class ServerCommunicationService : IServerCommunicationService
                 InstalledPrinters = installedPrinters
             };
 
+            _logger.LogDebug($"Sending registration to server: {_hostname}, User: {_userPrincipalName}, Printers: {installedPrinters.Count}");
             var response = await _httpClient.PostAsJsonAsync("/api/clients/register", dto);
             response.EnsureSuccessStatusCode();
 
-            return await response.Content.ReadFromJsonAsync<PrinterActionsResponse>();
+            var result = await response.Content.ReadFromJsonAsync<PrinterActionsResponse>();
+            _logger.LogDebug($"Received {result?.Actions?.Count ?? 0} actions from server");
+            return result;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error registering with server: {ex.Message}");
+            _logger.LogError(ex, "Error registering with server");
             return null;
         }
     }
@@ -64,15 +71,18 @@ public class ServerCommunicationService : IServerCommunicationService
             // Get current logged-in user
             _userPrincipalName = _userSessionService.GetLoggedInUser();
 
+            _logger.LogDebug($"Getting actions from server for {_hostname}, User: {_userPrincipalName}");
             var response = await _httpClient.GetAsync(
                 $"/api/clients/actions?hostname={_hostname}&userPrincipalName={Uri.EscapeDataString(_userPrincipalName)}");
 
             response.EnsureSuccessStatusCode();
-            return await response.Content.ReadFromJsonAsync<PrinterActionsResponse>();
+            var result = await response.Content.ReadFromJsonAsync<PrinterActionsResponse>();
+            _logger.LogDebug($"Received {result?.Actions?.Count ?? 0} actions from server");
+            return result;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error getting actions from server: {ex.Message}");
+            _logger.LogError(ex, "Error getting actions from server");
             return null;
         }
     }
