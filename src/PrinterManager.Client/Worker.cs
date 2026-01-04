@@ -9,6 +9,7 @@ public class Worker : BackgroundService
     private readonly IPrinterDetectionService _printerDetection;
     private readonly IPrinterManagementService _printerManagement;
     private readonly IServerCommunicationService _serverCommunication;
+    private readonly IAutostartService _autostartService;
     private readonly IConfiguration _configuration;
     private bool _isFirstRun = true;
 
@@ -17,18 +18,31 @@ public class Worker : BackgroundService
         IPrinterDetectionService printerDetection,
         IPrinterManagementService printerManagement,
         IServerCommunicationService serverCommunication,
+        IAutostartService autostartService,
         IConfiguration configuration)
     {
         _logger = logger;
         _printerDetection = printerDetection;
         _printerManagement = printerManagement;
         _serverCommunication = serverCommunication;
+        _autostartService = autostartService;
         _configuration = configuration;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("PrinterManager Client starting...");
+
+        // Configure autostart on first run
+        if (!_autostartService.IsAutostartEnabled())
+        {
+            _logger.LogInformation("Autostart not configured. Enabling autostart for current user...");
+            _autostartService.EnableAutostart();
+        }
+        else
+        {
+            _logger.LogInformation("Autostart is already configured");
+        }
 
         while (!stoppingToken.IsCancellationRequested)
         {
