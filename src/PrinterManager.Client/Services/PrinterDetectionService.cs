@@ -32,6 +32,10 @@ public class PrinterDetectionService : IPrinterDetectionService
                 var name = printer["Name"]?.ToString();
                 var network = printer["Network"]?.ToString();
                 var portName = printer["PortName"]?.ToString();
+                var shareName = printer["ShareName"]?.ToString();
+                var serverName = printer["ServerName"]?.ToString();
+
+                _logger.LogDebug($"Detected printer: Name='{name}', Network={network}, PortName='{portName}', ShareName='{shareName}', ServerName='{serverName}'");
 
                 if (!string.IsNullOrEmpty(name))
                 {
@@ -40,21 +44,30 @@ public class PrinterDetectionService : IPrinterDetectionService
                     // For network printers, try to get the actual share path
                     if (network == "True")
                     {
+                        _logger.LogDebug($"Processing network printer: {name}");
+
                         // If the printer name starts with \\, it's already the share path
                         if (name.StartsWith(@"\\"))
                         {
                             printerPath = name;
+                            _logger.LogDebug($"  -> Using name as path: {printerPath}");
                         }
                         // Otherwise, check if the port name contains the share path
                         else if (!string.IsNullOrEmpty(portName) && portName.StartsWith(@"\\"))
                         {
                             printerPath = portName;
+                            _logger.LogDebug($"  -> Using port name as path: {printerPath}");
                         }
                         // Last resort: use the printer name
                         else
                         {
                             printerPath = name;
+                            _logger.LogDebug($"  -> Using name as fallback path: {printerPath}");
                         }
+                    }
+                    else
+                    {
+                        _logger.LogDebug($"Skipping local printer: {name}");
                     }
 
                     printers.Add(new InstalledPrinterDto
