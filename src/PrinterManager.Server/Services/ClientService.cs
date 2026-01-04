@@ -14,14 +14,18 @@ public interface IClientService
 public class ClientService : IClientService
 {
     private readonly PrinterManagerDbContext _context;
+    private readonly ILogger<ClientService> _logger;
 
-    public ClientService(PrinterManagerDbContext context)
+    public ClientService(PrinterManagerDbContext context, ILogger<ClientService> logger)
     {
         _context = context;
+        _logger = logger;
     }
 
     public async Task<PrinterActionsResponse> RegisterClientAsync(ClientRegistrationDto dto)
     {
+        _logger.LogInformation($"Client registering: {dto.Hostname}, User: {dto.UserPrincipalName}, Printers: {dto.InstalledPrinters.Count}");
+
         // Find or create client
         var client = await _context.Clients
             .Include(c => c.InstalledPrinters)
@@ -97,6 +101,8 @@ public class ClientService : IClientService
 
     public async Task<PrinterActionsResponse> GetPrinterActionsAsync(string hostname, string userPrincipalName)
     {
+        _logger.LogInformation($"Getting printer actions for {hostname}, User: {userPrincipalName}");
+
         var client = await _context.Clients
             .Include(c => c.InstalledPrinters)
             .FirstOrDefaultAsync(c => c.Hostname == hostname);
@@ -105,7 +111,12 @@ public class ClientService : IClientService
             .FirstOrDefaultAsync(u => u.UserPrincipalName == userPrincipalName);
 
         if (client == null || user == null)
+        {
+            _logger.LogWarning($"Client or user not found: Client={client != null}, User={user != null}");
             return new PrinterActionsResponse();
+        }
+
+        _logger.LogInformation($"Client has {client.InstalledPrinters.Count} installed printers");
 
         var config = await _context.SystemConfigurations.FirstAsync();
 
@@ -120,6 +131,8 @@ public class ClientService : IClientService
             .Where(a => a.ClientId == client.Id && a.Printer!.IsAvailable)
             .ToListAsync();
 
+        _logger.LogInformation($"Found {userAssignments.Count} user assignments, {clientAssignments.Count} client assignments");
+
         // Determine which assignments to use based on priority
         List<PrinterAssignment> activeAssignments;
         if (config.AssignmentPriority == AssignmentPriority.UserPriority)
@@ -131,14 +144,21 @@ public class ClientService : IClientService
             activeAssignments = clientAssignments.Any() ? clientAssignments : userAssignments;
         }
 
+        _logger.LogInformation($"Using {activeAssignments.Count} active assignments (Priority: {config.AssignmentPriority})");
+
         var actions = new List<PrinterActionDto>();
         var installedPrinterPaths = client.InstalledPrinters.Select(p => p.PrinterPath).ToHashSet();
+
+        _logger.LogInformation($"Installed printer paths: {string.Join(", ", installedPrinterPaths)}");
 
         // Install assigned printers
         foreach (var assignment in activeAssignments)
         {
+            _logger.LogInformation($"Checking assignment: {assignment.Printer!.Name} ({assignment.Printer.SharePath})");
+
             if (!installedPrinterPaths.Contains(assignment.Printer!.SharePath))
             {
+                _logger.LogInformation($"  -> NOT INSTALLED - Adding Install action");
                 actions.Add(new PrinterActionDto
                 {
                     PrinterId = assignment.PrinterId,
@@ -146,6 +166,10 @@ public class ClientService : IClientService
                     SharePath = assignment.Printer.SharePath,
                     PrinterName = assignment.Printer.Name
                 });
+            }
+            else
+            {
+                _logger.LogInformation($"  -> Already installed");
             }
 
             // Set default printer
@@ -182,6 +206,8 @@ public class ClientService : IClientService
                 });
             }
         }
+
+        _logger.LogInformation($"Returning {actions.Count} actions to client");
 
         return new PrinterActionsResponse
         {
