@@ -65,22 +65,28 @@ public class ClientService : IClientService
 
         await _context.SaveChangesAsync();
 
-        // Update installed printers on first registration
-        if (!client.InstalledPrinters.Any())
+        // Update installed printers list
+        // Remove old entries
+        _context.ClientPrinters.RemoveRange(client.InstalledPrinters);
+
+        // Add current printers from client
+        foreach (var installedPrinter in dto.InstalledPrinters)
         {
-            foreach (var installedPrinter in dto.InstalledPrinters)
+            // Try to match with managed printer by SharePath
+            var managedPrinter = await _context.Printers
+                .FirstOrDefaultAsync(p => p.SharePath == installedPrinter.PrinterPath);
+
+            var clientPrinter = new ClientPrinter
             {
-                var clientPrinter = new ClientPrinter
-                {
-                    ClientId = client.Id,
-                    PrinterName = installedPrinter.PrinterName,
-                    PrinterPath = installedPrinter.PrinterPath,
-                    IsDefault = installedPrinter.IsDefault
-                };
-                _context.ClientPrinters.Add(clientPrinter);
-            }
-            await _context.SaveChangesAsync();
+                ClientId = client.Id,
+                PrinterName = installedPrinter.PrinterName,
+                PrinterPath = installedPrinter.PrinterPath,
+                IsDefault = installedPrinter.IsDefault,
+                ManagedPrinterId = managedPrinter?.Id
+            };
+            _context.ClientPrinters.Add(clientPrinter);
         }
+        await _context.SaveChangesAsync();
 
         // Return printer actions
         return await GetPrinterActionsAsync(dto.Hostname, dto.UserPrincipalName);

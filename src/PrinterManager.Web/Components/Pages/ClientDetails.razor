@@ -1,0 +1,218 @@
+@page "/clients/{id:int}"
+@rendermode InteractiveServer
+@inject IApiService ApiService
+@inject AuthStateService AuthState
+@inject NavigationManager Navigation
+
+<PageTitle>Client Details</PageTitle>
+
+@if (!AuthState.IsAuthenticated)
+{
+    Navigation.NavigateTo("/login");
+}
+else if (client == null)
+{
+    <p><em>Laden...</em></p>
+}
+else
+{
+<div class="mb-3">
+    <a href="/clients" class="btn btn-secondary">← Zurück zu Clients</a>
+</div>
+
+<h1>Client: @client.Hostname</h1>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <h5 class="card-title">Client-Informationen</h5>
+        <dl class="row">
+            <dt class="col-sm-3">Hostname:</dt>
+            <dd class="col-sm-9">@client.Hostname</dd>
+
+            <dt class="col-sm-3">IP-Adresse:</dt>
+            <dd class="col-sm-9">@client.IpAddress</dd>
+
+            <dt class="col-sm-3">Betriebssystem:</dt>
+            <dd class="col-sm-9">@client.OperatingSystem</dd>
+
+            <dt class="col-sm-3">Status:</dt>
+            <dd class="col-sm-9">
+                @if (client.IsActive)
+                {
+                    <span class="badge bg-success">Aktiv</span>
+                }
+                else
+                {
+                    <span class="badge bg-secondary">Inaktiv</span>
+                }
+            </dd>
+
+            <dt class="col-sm-3">Zuletzt gesehen:</dt>
+            <dd class="col-sm-9">@client.LastSeen.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss")</dd>
+        </dl>
+    </div>
+</div>
+
+<h3>Installierte Drucker</h3>
+
+@if (installedPrinters == null)
+{
+    <p><em>Lade installierte Drucker...</em></p>
+}
+else if (!installedPrinters.Any())
+{
+    <div class="alert alert-info">Keine Drucker installiert.</div>
+}
+else
+{
+    <div class="mb-3">
+        <strong>Gesamt: @installedPrinters.Count Drucker</strong>
+        (@assignedPrinters.Count zugewiesen, @manualPrinters.Count manuell installiert)
+    </div>
+
+    @if (assignedPrinters.Any())
+    {
+        <h4>Zugewiesene Drucker (@assignedPrinters.Count)</h4>
+        <table class="table table-striped mb-4">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Pfad</th>
+                    <th>Standard</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var printer in assignedPrinters)
+                {
+                    <tr>
+                        <td>@printer.PrinterName</td>
+                        <td><code>@printer.PrinterPath</code></td>
+                        <td>
+                            @if (printer.IsDefault)
+                            {
+                                <span class="badge bg-success">Ja</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-secondary">Nein</span>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    @if (manualPrinters.Any())
+    {
+        <h4>Manuell installierte Drucker (@manualPrinters.Count)</h4>
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Pfad</th>
+                    <th>Standard</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var printer in manualPrinters)
+                {
+                    <tr>
+                        <td>@printer.PrinterName</td>
+                        <td><code>@printer.PrinterPath</code></td>
+                        <td>
+                            @if (printer.IsDefault)
+                            {
+                                <span class="badge bg-success">Ja</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-secondary">Nein</span>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+}
+
+<h3>Zuweisungen</h3>
+
+@if (assignments == null)
+{
+    <p><em>Lade Zuweisungen...</em></p>
+}
+else if (!assignments.Any())
+{
+    <div class="alert alert-info">Keine Zuweisungen vorhanden.</div>
+}
+else
+{
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Drucker</th>
+                <th>Servicenummer</th>
+                <th>Standarddrucker</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var assignment in assignments)
+            {
+                <tr>
+                    <td>@assignment.PrinterName</td>
+                    <td>@(assignment.ServiceNumber ?? "-")</td>
+                    <td>
+                        @if (assignment.IsDefaultPrinter)
+                        {
+                            <span class="badge bg-success">Ja</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-secondary">Nein</span>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+}
+
+@code {
+    [Parameter]
+    public int Id { get; set; }
+
+    private ClientInfo? client;
+    private List<ClientPrinterDto>? installedPrinters;
+    private List<AssignmentDto>? assignments;
+
+    private List<ClientPrinterDto> assignedPrinters =>
+        installedPrinters?.Where(p => p.ManagedPrinterId.HasValue).ToList() ?? new();
+
+    private List<ClientPrinterDto> manualPrinters =>
+        installedPrinters?.Where(p => !p.ManagedPrinterId.HasValue).ToList() ?? new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        // Load client info
+        var clients = await ApiService.GetClientsAsync();
+        client = clients.FirstOrDefault(c => c.Id == Id);
+
+        if (client == null)
+        {
+            Navigation.NavigateTo("/clients");
+            return;
+        }
+
+        // Load installed printers and assignments
+        installedPrinters = await ApiService.GetClientPrintersAsync(Id);
+        assignments = await ApiService.GetClientAssignmentsAsync(Id);
+    }
+}

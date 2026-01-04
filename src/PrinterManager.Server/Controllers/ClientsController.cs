@@ -93,4 +93,27 @@ public class ClientsController : ControllerBase
         await _context.SaveChangesAsync();
         return NoContent();
     }
+
+    [HttpGet("{id}/printers")]
+    public async Task<ActionResult> GetClientPrinters(int id)
+    {
+        var client = await _context.Clients
+            .Include(c => c.InstalledPrinters)
+            .FirstOrDefaultAsync(c => c.Id == id);
+
+        if (client == null)
+            return NotFound();
+
+        var printers = client.InstalledPrinters.Select(p => new
+        {
+            p.Id,
+            p.PrinterName,
+            p.PrinterPath,
+            p.IsDefault,
+            p.ManagedPrinterId,
+            p.DetectedAt
+        }).ToList();
+
+        return Ok(printers);
+    }
 }

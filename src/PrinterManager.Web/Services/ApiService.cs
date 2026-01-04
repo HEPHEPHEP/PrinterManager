@@ -40,6 +40,9 @@ public interface IApiService
     Task<List<UserInfo>> GetUsersAsync();
     Task<bool> DeleteClientAsync(int id);
     Task<bool> DeleteUserAsync(int id);
+    Task<List<ClientPrinterDto>> GetClientPrintersAsync(int clientId);
+    Task<List<AssignmentDto>> GetClientAssignmentsAsync(int clientId);
+    Task<List<AssignmentDto>> GetUserAssignmentsAsync(int userId);
 
     // Print Server Scan
     Task<List<ScannedPrinterDto>> ScanPrintServerAsync(PrintServerScanDto dto);
@@ -220,6 +223,21 @@ public class ApiService : IApiService
         return response.IsSuccessStatusCode;
     }
 
+    public async Task<List<ClientPrinterDto>> GetClientPrintersAsync(int clientId)
+    {
+        return await _httpClient.GetFromJsonAsync<List<ClientPrinterDto>>($"/api/clients/{clientId}/printers") ?? new List<ClientPrinterDto>();
+    }
+
+    public async Task<List<AssignmentDto>> GetClientAssignmentsAsync(int clientId)
+    {
+        return await _httpClient.GetFromJsonAsync<List<AssignmentDto>>($"/api/assignments/client/{clientId}") ?? new List<AssignmentDto>();
+    }
+
+    public async Task<List<AssignmentDto>> GetUserAssignmentsAsync(int userId)
+    {
+        return await _httpClient.GetFromJsonAsync<List<AssignmentDto>>($"/api/assignments/user/{userId}") ?? new List<AssignmentDto>();
+    }
+
     // Print Server Scan
     public async Task<List<ScannedPrinterDto>> ScanPrintServerAsync(PrintServerScanDto dto)
     {
@@ -259,4 +277,14 @@ public class UserInfo
     public string? DisplayName { get; set; }
     public DateTime LastSeen { get; set; }
     public bool IsActive { get; set; }
+}
+
+public class ClientPrinterDto
+{
+    public int Id { get; set; }
+    public string PrinterName { get; set; } = string.Empty;
+    public string? PrinterPath { get; set; }
+    public bool IsDefault { get; set; }
+    public int? ManagedPrinterId { get; set; }
+    public DateTime DetectedAt { get; set; }
 }

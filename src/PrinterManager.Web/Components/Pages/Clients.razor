@@ -44,7 +44,7 @@ else
             {
                 <tr>
                     <td>
-                        <a href="@($"/assignments?search={Uri.EscapeDataString(client.Hostname)}&type=Client")" class="text-decoration-none">
+                        <a href="@($"/clients/{client.Id}")" class="text-decoration-none">
                             @client.Hostname
                         </a>
                     </td>
