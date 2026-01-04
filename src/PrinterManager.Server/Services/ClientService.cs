@@ -67,7 +67,10 @@ public class ClientService : IClientService
 
         // Update installed printers list
         // Remove old entries
-        _context.ClientPrinters.RemoveRange(client.InstalledPrinters);
+        var oldPrinters = await _context.ClientPrinters
+            .Where(cp => cp.ClientId == client.Id)
+            .ToListAsync();
+        _context.ClientPrinters.RemoveRange(oldPrinters);
 
         // Add current printers from client
         foreach (var installedPrinter in dto.InstalledPrinters)

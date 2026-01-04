@@ -24,13 +24,36 @@ public class PrinterDetectionService : IPrinterDetectionService
             {
                 var name = printer["Name"]?.ToString();
                 var network = printer["Network"]?.ToString();
+                var portName = printer["PortName"]?.ToString();
 
                 if (!string.IsNullOrEmpty(name))
                 {
+                    string? printerPath = null;
+
+                    // For network printers, try to get the actual share path
+                    if (network == "True")
+                    {
+                        // If the printer name starts with \\, it's already the share path
+                        if (name.StartsWith(@"\\"))
+                        {
+                            printerPath = name;
+                        }
+                        // Otherwise, check if the port name contains the share path
+                        else if (!string.IsNullOrEmpty(portName) && portName.StartsWith(@"\\"))
+                        {
+                            printerPath = portName;
+                        }
+                        // Last resort: use the printer name
+                        else
+                        {
+                            printerPath = name;
+                        }
+                    }
+
                     printers.Add(new InstalledPrinterDto
                     {
                         PrinterName = name,
-                        PrinterPath = network == "True" ? name : null,
+                        PrinterPath = printerPath,
                         IsDefault = name == defaultPrinter
                     });
                 }
