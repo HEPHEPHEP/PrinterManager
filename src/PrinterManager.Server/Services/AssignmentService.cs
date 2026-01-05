@@ -13,6 +13,7 @@ public interface IAssignmentService
     Task<AssignmentDto> CreateAssignmentAsync(CreateAssignmentDto dto);
     Task<List<AssignmentDto>> CreateBulkAssignmentsAsync(BulkAssignmentDto dto);
     Task<bool> DeleteAssignmentAsync(int id);
+    Task<AssignmentDto?> SetAsDefaultPrinterAsync(int assignmentId);
     Task ApplyReplacementPrinterAsync(int originalPrinterId, int replacementPrinterId);
     Task RestoreOriginalPrinterAsync(int originalPrinterId);
 }
@@ -236,6 +237,52 @@ public class AssignmentService : IAssignmentService
         _context.PrinterAssignments.Remove(assignment);
         await _context.SaveChangesAsync();
         return true;
+    }
+
+    public async Task<AssignmentDto?> SetAsDefaultPrinterAsync(int assignmentId)
+    {
+        var assignment = await _context.PrinterAssignments
+            .Include(a => a.Printer)
+            .Include(a => a.User)
+            .Include(a => a.Client)
+            .FirstOrDefaultAsync(a => a.Id == assignmentId);
+
+        if (assignment == null)
+            return null;
+
+        // Unset any existing default printer for this user/client
+        var existingDefaults = await _context.PrinterAssignments
+            .Where(a =>
+                a.Id != assignmentId &&
+                a.IsDefaultPrinter &&
+                a.AssignmentType == assignment.AssignmentType &&
+                a.UserId == assignment.UserId &&
+                a.ClientId == assignment.ClientId)
+            .ToListAsync();
+
+        foreach (var defaultAssignment in existingDefaults)
+        {
+            defaultAssignment.IsDefaultPrinter = false;
+        }
+
+        // Set this assignment as default
+        assignment.IsDefaultPrinter = true;
+
+        await _context.SaveChangesAsync();
+
+        return new AssignmentDto
+        {
+            Id = assignment.Id,
+            PrinterId = assignment.PrinterId,
+            PrinterName = assignment.Printer!.Name,
+            ServiceNumber = assignment.Printer!.ServiceNumber,
+            AssignmentType = assignment.AssignmentType.ToString(),
+            UserId = assignment.UserId,
+            UserPrincipalName = assignment.User?.UserPrincipalName,
+            ClientId = assignment.ClientId,
+            ClientHostname = assignment.Client?.Hostname,
+            IsDefaultPrinter = assignment.IsDefaultPrinter
+        };
     }
 
     public async Task ApplyReplacementPrinterAsync(int originalPrinterId, int replacementPrinterId)

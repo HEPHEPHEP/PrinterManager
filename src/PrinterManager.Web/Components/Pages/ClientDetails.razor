@@ -155,6 +155,7 @@ else
                 <th>Drucker</th>
                 <th>Servicenummer</th>
                 <th>Standarddrucker</th>
+                <th>Aktionen</th>
             </tr>
         </thead>
         <tbody>
@@ -171,6 +172,14 @@ else
                         else
                         {
                             <span class="badge bg-secondary">Nein</span>
+                        }
+                    </td>
+                    <td>
+                        @if (!assignment.IsDefaultPrinter)
+                        {
+                            <button class="btn btn-sm btn-primary" @onclick="() => SetAsDefault(assignment.Id)">
+                                Als Standard festlegen
+                            </button>
                         }
                     </td>
                 </tr>
@@ -214,5 +223,15 @@ else
         // Load installed printers and assignments
         installedPrinters = await ApiService.GetClientPrintersAsync(Id);
         assignments = await ApiService.GetClientAssignmentsAsync(Id);
+    }
+
+    private async Task SetAsDefault(int assignmentId)
+    {
+        var result = await ApiService.SetAssignmentAsDefaultAsync(assignmentId);
+        if (result != null)
+        {
+            // Reload assignments to reflect the change
+            assignments = await ApiService.GetClientAssignmentsAsync(Id);
+        }
     }
 }

@@ -59,4 +59,14 @@ public class AssignmentsController : ControllerBase
 
         return NoContent();
     }
+
+    [HttpPut("{id}/set-default")]
+    public async Task<ActionResult<AssignmentDto>> SetAsDefault(int id)
+    {
+        var assignment = await _assignmentService.SetAsDefaultPrinterAsync(id);
+        if (assignment == null)
+            return NotFound();
+
+        return Ok(assignment);
+    }
 }
