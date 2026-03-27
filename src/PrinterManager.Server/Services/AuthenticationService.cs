@@ -5,7 +5,6 @@ using PrinterManager.Shared.DTOs;
 using PrinterManager.Shared.Models;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
-using System.Security.Cryptography;
 using System.Text;
 
 namespace PrinterManager.Server.Services;
@@ -86,6 +85,12 @@ public class AuthenticationService : IAuthenticationService
                 Success = false,
                 Message = "Ungültiger Benutzername oder Passwort"
             };
+        }
+
+        // Automatische Hash-Migration: SHA256 → BCrypt beim nächsten Login
+        if (!user.PasswordHash.StartsWith("$2"))
+        {
+            user.PasswordHash = HashPassword(dto.Password);
         }
 
         user.LastLogin = DateTime.UtcNow;
@@ -239,7 +244,9 @@ public class AuthenticationService : IAuthenticationService
 
     private string GenerateJwtToken(ApplicationUser user)
     {
-        var jwtKey = _configuration["Jwt:Key"] ?? "YourSuperSecretKeyThatIsAtLeast32CharactersLong!";
+        var jwtKey = _configuration["Jwt:Key"]
+            ?? throw new InvalidOperationException(
+                "JWT-Key nicht konfiguriert. Bitte Jwt:Key in appsettings.json oder Umgebungsvariable setzen.");
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
@@ -263,14 +270,22 @@ public class AuthenticationService : IAuthenticationService
 
     private static string HashPassword(string password)
     {
-        using var sha256 = SHA256.Create();
-        var hashedBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(password));
-        return Convert.ToBase64String(hashedBytes);
+        return BCrypt.Net.BCrypt.HashPassword(password, workFactor: 12);
     }
 
     private static bool VerifyPassword(string password, string hash)
     {
-        var passwordHash = HashPassword(password);
-        return passwordHash == hash;
+        // Abwärtskompatibilität: alte SHA256-Hashes erkennen und beim Login migrieren
+        if (!hash.StartsWith("$2"))
+        {
+            // Altes SHA256-Format — prüfen und bei Erfolg Hash upgraden
+            using var sha256 = System.Security.Cryptography.SHA256.Create();
+            var oldHash = Convert.ToBase64String(
+                sha256.ComputeHash(Encoding.UTF8.GetBytes(password)));
+            return oldHash == hash;
+            // Hinweis: Der Aufrufer sollte nach erfolgreichem Login den Hash
+            // mit HashPassword() neu setzen (siehe LoginAsync Migration)
+        }
+        return BCrypt.Net.BCrypt.Verify(password, hash);
     }
 }

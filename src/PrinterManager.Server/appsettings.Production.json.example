@@ -1,0 +1,19 @@
+{
+  "_HINWEIS": "Kopiere diese Datei nach appsettings.Production.json und fülle die Werte aus.",
+
+  "Jwt": {
+    "Key": "HIER_EINEN_SICHEREN_SCHLÜSSEL_EINTRAGEN_MINDESTENS_32_ZEICHEN"
+  },
+  "Cors": {
+    "AllowedOrigins": [
+      "https://printermanager.meinefirma.de"
+    ]
+  },
+  "Ldap": {
+    "Enabled": false,
+    "Server": "",
+    "Port": 389,
+    "BaseDn": "",
+    "UserDnTemplate": ""
+  }
+}

@@ -128,30 +128,23 @@ public class PrinterManagerDbContext : DbContext
             entity.HasKey(e => e.Id);
         });
 
-        // Seed default admin user (password: admin)
-        modelBuilder.Entity<ApplicationUser>().HasData(
-            new ApplicationUser
-            {
-                Id = 1,
-                Username = "admin",
-                PasswordHash = "jGl25bVBBBW96Qi9Te4V37Fnqchz/Eu4qB9vKrRIqRg=", // SHA256 of "admin"
-                IsActive = true,
-                IsLdapUser = false,
-                Role = UserRole.Administrator,
-                CreatedAt = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc)
-            }
-        );
+        // Admin-Benutzer wird NICHT mehr per Seed mit festem Hash erstellt.
+        // Stattdessen wird beim ersten Start ein Admin mit Passwort aus der
+        // Umgebungsvariable ADMIN_PASSWORD erstellt (siehe Program.cs).
+        // 
+        // Falls die DB bereits einen alten SHA256-Admin-Hash enthält:
+        // Beim nächsten Login wird der Hash automatisch auf BCrypt migriert.
 
-        // Seed default LDAP configuration
+        // Seed default LDAP configuration (leer — wird über Admin-UI konfiguriert)
         modelBuilder.Entity<LdapConfiguration>().HasData(
             new LdapConfiguration
             {
                 Id = 1,
                 Enabled = false,
-                Server = "ldap.example.com",
+                Server = "",
                 Port = 389,
-                BaseDn = "dc=example,dc=com",
-                UserDnTemplate = "uid={0},ou=users,dc=example,dc=com"
+                BaseDn = "",
+                UserDnTemplate = ""
             }
         );
 
