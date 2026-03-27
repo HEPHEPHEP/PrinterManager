@@ -1,0 +1,49 @@
+# Build
+bin/
+obj/
+out/
+publish/
+
+# User-specific
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.userprefs
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.swp
+*~
+
+# NuGet
+packages/
+*.nupkg
+
+# Environment & Secrets
+appsettings.Production.json
+appsettings.Local.json
+*.pfx
+*.pem
+*.key
+
+# Databases
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test results
+TestResults/
+coverage/
