@@ -1,99 +1,80 @@
-@inject AuthStateService AuthState
-@inject NavigationManager Navigation
-@implements IDisposable
+@using System.Security.Claims
+
+@* Das Menü wird statisch gerendert — bei jedem Seitenwechsel neu, mit dem Benutzer aus dem
+   Anmelde-Cookie. Ein Abonnieren von Zustandsänderungen ist damit nicht nötig. *@
 
 <div class="top-row ps-3 navbar navbar-dark">
     <div class="container-fluid">
         <a class="navbar-brand" href="">PrinterManager</a>
-        @if (AuthState.IsAuthenticated)
-        {
+        <AuthorizeView>
             <div class="text-white">
-                <small>@AuthState.Username (@AuthState.Role)</small>
+                <small>@context.User.Identity?.Name (@context.User.FindFirst(ClaimTypes.Role)?.Value)</small>
             </div>
-        }
+        </AuthorizeView>
     </div>
 </div>
 
 <nav class="flex-column">
-    @if (AuthState.IsAuthenticated)
-    {
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
-                <span class="icon icon-home" aria-hidden="true"></span> Übersicht
-            </NavLink>
-        </div>
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="printers">
-                <span class="icon icon-print" aria-hidden="true"></span> Drucker
-            </NavLink>
-        </div>
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="scan">
-                <span class="icon icon-search" aria-hidden="true"></span> Server scannen
-            </NavLink>
-        </div>
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="assignments">
-                <span class="icon icon-link" aria-hidden="true"></span> Zuweisungen
-            </NavLink>
-        </div>
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="clients">
-                <span class="icon icon-monitor" aria-hidden="true"></span> Clients
-            </NavLink>
-        </div>
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="users">
-                <span class="icon icon-people" aria-hidden="true"></span> Benutzer
-            </NavLink>
-        </div>
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="configuration">
-                <span class="icon icon-settings" aria-hidden="true"></span> Einstellungen
-            </NavLink>
-        </div>
-        @if (AuthState.Role == "Administrator")
-        {
+    <AuthorizeView>
+        <Authorized>
             <div class="nav-item px-3">
-                <NavLink class="nav-link" href="security">
-                    <span class="icon icon-lock" aria-hidden="true"></span> Sicherheit
+                <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
+                    <span class="icon icon-home" aria-hidden="true"></span> Übersicht
                 </NavLink>
             </div>
-        }
-        <div class="nav-item px-3">
-            <a class="nav-link" href="#" @onclick="Logout">
-                <span class="icon icon-logout" aria-hidden="true"></span> Abmelden
-            </a>
-        </div>
-    }
-    else
-    {
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="login">
-                <span class="icon icon-login" aria-hidden="true"></span> Anmelden
-            </NavLink>
-        </div>
-    }
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="printers">
+                    <span class="icon icon-print" aria-hidden="true"></span> Drucker
+                </NavLink>
+            </div>
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="scan">
+                    <span class="icon icon-search" aria-hidden="true"></span> Server scannen
+                </NavLink>
+            </div>
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="assignments">
+                    <span class="icon icon-link" aria-hidden="true"></span> Zuweisungen
+                </NavLink>
+            </div>
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="clients">
+                    <span class="icon icon-monitor" aria-hidden="true"></span> Clients
+                </NavLink>
+            </div>
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="users">
+                    <span class="icon icon-people" aria-hidden="true"></span> Benutzer
+                </NavLink>
+            </div>
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="configuration">
+                    <span class="icon icon-settings" aria-hidden="true"></span> Einstellungen
+                </NavLink>
+            </div>
+            <AuthorizeView Roles="Administrator" Context="admin">
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="security">
+                        <span class="icon icon-lock" aria-hidden="true"></span> Sicherheit
+                    </NavLink>
+                </div>
+            </AuthorizeView>
+            <div class="nav-item px-3">
+                @* POST mit Antiforgery-Token, siehe /logout in Program.cs. *@
+                <form action="logout" method="post">
+                    <AntiforgeryToken />
+                    <button type="submit" class="nav-link nav-button">
+                        <span class="icon icon-logout" aria-hidden="true"></span> Abmelden
+                    </button>
+                </form>
+            </div>
+        </Authorized>
+        <NotAuthorized>
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="login">
+                    <span class="icon icon-login" aria-hidden="true"></span> Anmelden
+                </NavLink>
+            </div>
+        </NotAuthorized>
+    </AuthorizeView>
 </nav>
-
-@code {
-    protected override void OnInitialized()
-    {
-        AuthState.OnChange += OnAuthStateChanged;
-    }
-
-    // Das Event kann aus einem anderen Thread als dem Renderer kommen — StateHasChanged
-    // muss deshalb über den Synchronisationskontext des Circuits laufen.
-    private void OnAuthStateChanged() => _ = InvokeAsync(StateHasChanged);
-
-    private void Logout()
-    {
-        AuthState.ClearAuthInfo();
-        Navigation.NavigateTo("/login");
-    }
-
-    public void Dispose()
-    {
-        AuthState.OnChange -= OnAuthStateChanged;
-    }
-}

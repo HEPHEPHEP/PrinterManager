@@ -1,18 +1,12 @@
 @page "/printers"
 @rendermode InteractiveServer
+@attribute [Authorize]
 @inject IApiService ApiService
-@inject AuthStateService AuthState
 @inject NavigationManager Navigation
 @inject IJSRuntime JSRuntime
 
 <PageTitle>Drucker – PrinterManager</PageTitle>
 
-@if (!AuthState.IsAuthenticated)
-{
-    <RedirectToLogin />
-}
-else
-{
 <h1>Drucker verwalten</h1>
 
 @if (!string.IsNullOrEmpty(errorMessage))
@@ -172,7 +166,6 @@ else
     </div>
     <div class="modal-backdrop show"></div>
 }
-}
 
 @code {
     private List<PrinterDto>? printers;
@@ -203,10 +196,6 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        // Ohne Anmeldung keine API-Aufrufe — der Server antwortet sonst mit 401.
-        if (!AuthState.IsAuthenticated)
-            return;
-
         await LoadPrinters();
     }
 

@@ -1,16 +1,12 @@
 @page "/clients/{id:int}"
 @rendermode InteractiveServer
+@attribute [Authorize]
 @inject IApiService ApiService
-@inject AuthStateService AuthState
 @inject NavigationManager Navigation
 
 <PageTitle>Client Details – PrinterManager</PageTitle>
 
-@if (!AuthState.IsAuthenticated)
-{
-    <RedirectToLogin />
-}
-else if (client == null)
+@if (client == null)
 {
     <p><em>Laden...</em></p>
 }
@@ -205,6 +201,11 @@ else
 }
 
 @code {
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthenticationState { get; set; } = default!;
+
+    private bool isAdministrator;
+
     [Parameter]
     public int Id { get; set; }
 
@@ -214,8 +215,6 @@ else
     private string errorMessage = "";
     private string successMessage = "";
 
-    private bool isAdministrator => AuthState.Role == "Administrator";
-
     private List<ClientPrinterDto> assignedPrinters =>
         installedPrinters?.Where(p => p.ManagedPrinterId.HasValue).ToList() ?? new();
 
@@ -224,10 +223,7 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        // Ohne Anmeldung keine API-Aufrufe — der Server antwortet sonst mit 401.
-        if (!AuthState.IsAuthenticated)
-            return;
-
+        isAdministrator = (await AuthenticationState).User.IsInRole("Administrator");
         await LoadData();
     }
 

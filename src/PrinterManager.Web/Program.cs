@@ -1,3 +1,6 @@
+using Microsoft.AspNetCore.Antiforgery;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using PrinterManager.Shared.Http;
 using PrinterManager.Web.Components;
 using PrinterManager.Web.Services;
@@ -8,10 +11,27 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-// WICHTIG: Scoped, nicht Singleton! In Blazor Server entspricht "Scoped" genau einer
-// Benutzer-Verbindung (Circuit). Als Singleton würden sich ALLE Besucher Token, Benutzername
-// und Rolle teilen — wer sich anmeldet, meldet damit alle anderen mit an.
-builder.Services.AddScoped<AuthStateService>();
+// Anmeldung per Cookie. Das Cookie trägt Name, Rolle und das JWT des Servers (siehe
+// Login.razor) und ist per Data Protection verschlüsselt. Anders als ein Zustand im
+// Arbeitsspeicher sieht es jede Anfrage: das Vorab-Rendern, die interaktive Verbindung und
+// ein Neuladen der Seite.
+builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(options =>
+    {
+        options.Cookie.Name = "PrinterManager.Auth";
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SameSite = SameSiteMode.Lax;
+        // Die Web-Anwendung läuft standardmäßig über HTTP — "Always" würde dort das Cookie
+        // verwerfen. Hinter HTTPS wird es automatisch als Secure gesetzt.
+        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+        options.LoginPath = "/login";
+        options.AccessDeniedPath = "/status/403";
+        // Das Cookie endet mit dem JWT (Ablauf wird beim Anmelden gesetzt). Verlängern würde
+        // nur ein Cookie mit abgelaufenem Token am Leben halten.
+        options.SlidingExpiration = false;
+    });
+builder.Services.AddAuthorization();
+builder.Services.AddCascadingAuthenticationState();
 
 builder.Services.AddHttpClient<IApiService, ApiService>((serviceProvider, client) =>
 {
@@ -49,7 +69,20 @@ if (!app.Environment.IsDevelopment())
 app.UseStatusCodePagesWithReExecute("/status/{0}");
 
 app.UseStaticFiles();
+app.UseAuthentication();
+app.UseAuthorization();
 app.UseAntiforgery();
+
+// Abmelden nur per POST mit Antiforgery-Token: ein einfacher Link ließe sich von fremden
+// Seiten auslösen und würde Benutzer ungefragt abmelden.
+app.MapPost("/logout", async (HttpContext context, IAntiforgery antiforgery) =>
+{
+    if (!await antiforgery.IsRequestValidAsync(context))
+        return Results.BadRequest();
+
+    await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+    return Results.LocalRedirect("~/login");
+});
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();

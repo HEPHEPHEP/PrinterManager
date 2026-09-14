@@ -64,6 +64,7 @@ Damit läuft alles, ist aber noch **nicht produktionsreif**: siehe
 
 ### Sicherheit & Authentifizierung
 - ✅ JWT-basierte Authentifizierung — **alle** API-Endpunkte sind per Fallback-Policy geschützt
+- ✅ Web-Oberfläche mit Cookie-Anmeldung (HttpOnly, verschlüsselt) — übersteht Seitenwechsel und Neuladen
 - ✅ Rollenbasierte Zugriffskontrolle (Administrator, Benutzer)
 - ✅ Client-Endpunkte über Kerberos/NTLM oder gemeinsamen Schlüssel absicherbar
 - ✅ Identität der Clients aus dem Kerberos-Ticket statt aus deren eigener Angabe
@@ -241,6 +242,24 @@ dotnet build -c Release
 ```bash
 dotnet run --urls "http://0.0.0.0:5001"
 ```
+
+#### Anmeldung in der Web-Anwendung
+
+Die Web-Anwendung meldet sich beim Server an und merkt sich das Ergebnis in einem Cookie
+(`PrinterManager.Auth`). Es enthält Benutzername, Rolle und das JWT des Servers, ist
+`HttpOnly` und per ASP.NET Core Data Protection verschlüsselt und signiert.
+
+- **Gültigkeit**: Das Cookie endet zusammen mit dem JWT (Sitzungsdauer, Vorgabe 8 Stunden)
+  und wird nicht verlängert. Es ist ein Sitzungscookie — nach dem Schließen des Browsers ist
+  eine neue Anmeldung nötig, ein Neuladen der Seite übersteht es.
+- **Abmelden** löscht das Cookie im Browser.
+- **HTTPS**: Hinter HTTPS wird das Cookie als `Secure` gesetzt. Über HTTP läuft die
+  Anmeldung weiterhin, das Cookie ist dann aber — wie jeder andere Verkehr — mitlesbar.
+- **Data-Protection-Schlüssel**: Unter Windows legt ASP.NET Core sie im Profil des Kontos
+  ab, unter dem die Web-Anwendung läuft (`%LOCALAPPDATA%\ASP.NET\DataProtection-Keys`).
+  Hat das Konto kein geladenes Profil (etwa ein IIS-Anwendungspool ohne
+  „Benutzerprofil laden“), werden die Schlüssel nur im Speicher gehalten — dann meldet ein
+  Neustart der Web-Anwendung alle Benutzer ab.
 
 ## Verwendung
 
@@ -634,7 +653,12 @@ Nach der Inbetriebnahme in dieser Reihenfolge abarbeiten:
   sollte nur für das Dienstkonto lesbar sein.
 - **Rollenänderungen wirken verzögert**: JWTs lassen sich nicht widerrufen; eine entzogene
   Administratorrolle greift erst nach Ablauf der Sitzungsdauer (einstellbar unter
-  Einstellungen → Anmeldung, Vorgabe 8 Stunden).
+  Einstellungen → Anmeldung, Vorgabe 8 Stunden). Dasselbe gilt für das Anmelde-Cookie der
+  Web-Anwendung: Abmelden löscht es im Browser, eine vorher abgegriffene Kopie bliebe bis
+  zum Ablauf gültig.
+- **Neuer JWT-Schlüssel erfordert Neuanmeldung**: Wird `Jwt:Key` gewechselt, lehnt der
+  Server die Tokens in bestehenden Cookies ab. Die Seiten zeigen dann Ladefehler, bis sich
+  der Benutzer ab- und wieder anmeldet.
 - **Einstellungsänderungen brauchen einen Neustart**: alles außerhalb der
   Zuweisungseinstellungen und LDAP wird beim Start gelesen. Die Oberfläche kann den
   Server nicht selbst neu starten.

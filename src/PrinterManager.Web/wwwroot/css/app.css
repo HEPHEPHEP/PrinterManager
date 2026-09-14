@@ -46,6 +46,15 @@ main {
     color: white;
 }
 
+/* "Abmelden" ist ein Formular-Button (POST), soll aber wie die Menü-Links aussehen. */
+.nav-button {
+    width: 100%;
+    border: 0;
+    background: none;
+    font: inherit;
+    text-align: left;
+}
+
 .modal.show {
     display: block;
 }
