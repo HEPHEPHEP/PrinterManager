@@ -1,0 +1,31 @@
+@page "/Error"
+@using System.Diagnostics
+
+@* Ziel von UseExceptionHandler (nur außerhalb von Development). Bewusst ohne @rendermode:
+   die Seite muss auch dann noch rendern, wenn der Fehler die interaktive Verbindung
+   verhindert hat — und nur beim statischen Rendern steht HttpContext zur Verfügung. *@
+
+<PageTitle>Fehler – PrinterManager</PageTitle>
+
+<h1 class="text-danger">Fehler</h1>
+<p>Bei der Verarbeitung der Anfrage ist ein unerwarteter Fehler aufgetreten.</p>
+
+@if (!string.IsNullOrEmpty(RequestId))
+{
+    <p>
+        <strong>Anfrage-ID:</strong> <code>@RequestId</code><br />
+        <small class="text-muted">Bitte bei Rückfragen angeben.</small>
+    </p>
+}
+
+<p><a href="">Zur Übersicht</a></p>
+
+@code {
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    private string? RequestId { get; set; }
+
+    protected override void OnInitialized() =>
+        RequestId = Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
+}

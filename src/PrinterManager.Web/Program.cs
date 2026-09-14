@@ -39,9 +39,14 @@ var app = builder.Build();
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
 {
-    app.UseExceptionHandler("/Error");
+    // Eigener Scope für die Fehlerseite: sonst rendert sie mit den Diensten der
+    // fehlgeschlagenen Anfrage weiter, und Blazor bricht beim zweiten Rendern ab.
+    app.UseExceptionHandler("/Error", createScopeForErrors: true);
     app.UseHsts();
 }
+
+// Leere Fehlerantworten (v. a. 404 für unbekannte Adressen) durch eine Seite ersetzen.
+app.UseStatusCodePagesWithReExecute("/status/{0}");
 
 app.UseStaticFiles();
 app.UseAntiforgery();

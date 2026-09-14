@@ -1,0 +1,35 @@
+@page "/status/{Code:int}"
+
+@* Ziel von UseStatusCodePagesWithReExecute: ersetzt die leere Antwort bei 404 & Co.
+   Der ursprüngliche Statuscode bleibt dabei erhalten. Der NotFound-Zweig in Routes.razor
+   greift beim statischen Rendern nicht, weil unbekannte Adressen gar keinen Endpunkt
+   erreichen. *@
+
+<PageTitle>@Title – PrinterManager</PageTitle>
+
+<h1>@Title</h1>
+<p>@Message</p>
+<p><a href="">Zur Übersicht</a></p>
+
+@code {
+    [Parameter]
+    public int Code { get; set; }
+
+    private string Title => Code switch
+    {
+        404 => "Seite nicht gefunden",
+        400 => "Ungültige Anfrage",
+        403 => "Zugriff verweigert",
+        405 => "Methode nicht erlaubt",
+        _ => $"Fehler {Code}"
+    };
+
+    private string Message => Code switch
+    {
+        404 => "Die angeforderte Seite existiert nicht. Möglicherweise ist der Link veraltet oder die Adresse falsch geschrieben.",
+        400 => "Die Anfrage konnte nicht verarbeitet werden. Bitte die Seite neu laden und es erneut versuchen.",
+        403 => "Für diese Seite fehlt die Berechtigung.",
+        405 => "Diese Adresse unterstützt die verwendete Anfragemethode nicht.",
+        _ => "Die Anfrage konnte nicht verarbeitet werden."
+    };
+}
