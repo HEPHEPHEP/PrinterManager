@@ -1,9 +1,14 @@
 @page "/login"
-@rendermode InteractiveServer
+@using System.ComponentModel.DataAnnotations
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Authentication.Cookies
 @inject IApiService ApiService
-@inject AuthStateService AuthState
 @inject NavigationManager Navigation
 @inject ILogger<Login> Logger
+
+@* Bewusst ohne @rendermode: das Anmelde-Cookie lässt sich nur in einer HTTP-Antwort setzen,
+   nicht über die interaktive Verbindung. Das Formular wird deshalb klassisch abgeschickt. *@
 
 <PageTitle>Login – PrinterManager</PageTitle>
 
@@ -18,25 +23,19 @@
                     <div class="alert alert-danger">@errorMessage</div>
                 }
 
-                <EditForm Model="@loginDto" OnValidSubmit="HandleLogin">
+                <EditForm Model="Input" method="post" OnValidSubmit="HandleLogin" FormName="login">
+                    <DataAnnotationsValidator />
                     <div class="mb-3">
-                        <label class="form-label">Benutzername:</label>
-                        <InputText class="form-control" @bind-Value="loginDto.Username" />
+                        <label class="form-label" for="username">Benutzername:</label>
+                        <InputText id="username" class="form-control" autocomplete="username" @bind-Value="Input.Username" />
+                        <ValidationMessage For="() => Input.Username" class="text-danger" />
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Passwort:</label>
-                        <InputText type="password" class="form-control" @bind-Value="loginDto.Password" />
+                        <label class="form-label" for="password">Passwort:</label>
+                        <InputText id="password" type="password" class="form-control" autocomplete="current-password" @bind-Value="Input.Password" />
+                        <ValidationMessage For="() => Input.Password" class="text-danger" />
                     </div>
-                    <button type="submit" class="btn btn-primary w-100" disabled="@isLoggingIn">
-                        @if (isLoggingIn)
-                        {
-                            <span>Anmeldung...</span>
-                        }
-                        else
-                        {
-                            <span>Anmelden</span>
-                        }
-                    </button>
+                    <button type="submit" class="btn btn-primary w-100">Anmelden</button>
                 </EditForm>
 
             </div>
@@ -45,39 +44,96 @@
 </div>
 
 @code {
-    private LoginDto loginDto = new() { Username = "", Password = "" };
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromForm]
+    private InputModel Input { get; set; } = new();
+
+    [SupplyParameterFromQuery]
+    private string? ReturnUrl { get; set; }
+
     private string errorMessage = "";
-    private bool isLoggingIn = false;
+
+    protected override void OnInitialized()
+    {
+        // Wer schon angemeldet ist, braucht die Seite nicht — etwa nach "Zurück" im Browser.
+        if (HttpMethods.IsGet(HttpContext.Request.Method) && HttpContext.User.Identity?.IsAuthenticated == true)
+        {
+            Navigation.NavigateTo(SafeReturnUrl);
+        }
+    }
 
     private async Task HandleLogin()
     {
-        isLoggingIn = true;
-        errorMessage = "";
-
+        LoginResponseDto result;
         try
         {
-            var result = await ApiService.LoginAsync(loginDto);
-
-            if (result.Success && result.Token != null)
-            {
-                AuthState.SetAuthInfo(result.Token, result.Username ?? "", result.Role ?? "");
-                Navigation.NavigateTo("/");
-            }
-            else
-            {
-                // Passwort bewusst nirgends protokollieren.
-                Logger.LogInformation("Anmeldung für {Username} fehlgeschlagen", loginDto.Username);
-                errorMessage = result.Message ?? "Login fehlgeschlagen";
-            }
+            result = await ApiService.LoginAsync(new LoginDto { Username = Input.Username, Password = Input.Password });
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Fehler bei der Anmeldung");
             errorMessage = "Anmeldung nicht möglich. Bitte Serververbindung prüfen.";
+            return;
         }
-        finally
+
+        if (!result.Success || string.IsNullOrEmpty(result.Token))
         {
-            isLoggingIn = false;
+            // Passwort bewusst nirgends protokollieren.
+            Logger.LogInformation("Anmeldung für {Username} fehlgeschlagen", Input.Username);
+            errorMessage = result.Message ?? "Login fehlgeschlagen";
+            return;
         }
+
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.Name, result.Username ?? Input.Username),
+            new(AccessToken.ClaimType, result.Token)
+        };
+        if (!string.IsNullOrEmpty(result.Role))
+        {
+            claims.Add(new Claim(ClaimTypes.Role, result.Role));
+        }
+
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme));
+
+        // Das Cookie gilt genau so lange wie das Token. Ohne lesbaren Ablauf greift die
+        // Vorgabe des Servers (Jwt:TokenLifetimeHours = 8).
+        var expires = AccessToken.ReadExpiry(result.Token) ?? DateTimeOffset.UtcNow.AddHours(8);
+
+        await HttpContext.SignInAsync(
+            CookieAuthenticationDefaults.AuthenticationScheme,
+            principal,
+            new AuthenticationProperties
+            {
+                ExpiresUtc = expires,
+                IsPersistent = false,
+                AllowRefresh = false
+            });
+
+        // Außerhalb des try: NavigateTo beendet das statische Rendern mit einer Weiterleitung.
+        Navigation.NavigateTo(SafeReturnUrl);
+    }
+
+    /// <summary>
+    /// Nur Pfade innerhalb dieser Anwendung — sonst ließe sich über einen präparierten
+    /// Login-Link auf eine fremde Seite weiterleiten.
+    /// </summary>
+    private string SafeReturnUrl => IsLocalUrl(ReturnUrl) ? ReturnUrl! : "/";
+
+    private static bool IsLocalUrl(string? url) =>
+        !string.IsNullOrEmpty(url)
+        && url[0] == '/'
+        && (url.Length == 1 || (url[1] != '/' && url[1] != '\\'))
+        && !url.Any(char.IsControl);
+
+    private sealed class InputModel
+    {
+        [Required(ErrorMessage = "Benutzername fehlt.")]
+        public string Username { get; set; } = "";
+
+        [Required(ErrorMessage = "Passwort fehlt.")]
+        public string Password { get; set; } = "";
     }
 }

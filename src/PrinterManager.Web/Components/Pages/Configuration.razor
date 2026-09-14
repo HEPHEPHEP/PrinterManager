@@ -1,16 +1,10 @@
 @page "/configuration"
 @rendermode InteractiveServer
+@attribute [Authorize]
 @inject IApiService ApiService
-@inject AuthStateService AuthState
 
 <PageTitle>Einstellungen – PrinterManager</PageTitle>
 
-@if (!AuthState.IsAuthenticated)
-{
-    <RedirectToLogin />
-}
-else
-{
 <h1>Einstellungen</h1>
 
 @if (!string.IsNullOrEmpty(errorMessage))
@@ -453,9 +447,13 @@ else if (activeTab == "status")
         </div>
     }
 }
-}
 
 @code {
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthenticationState { get; set; } = default!;
+
+    private bool isAdministrator;
+
     private SystemConfiguration? config;
     private ServerSettingsDto? settings;
     private ServerStatusDto? status;
@@ -468,16 +466,11 @@ else if (activeTab == "status")
     private bool restartRequired;
     private bool isSaving;
 
-    private bool isAdministrator => AuthState.Role == "Administrator";
-
     private string Active(string tab) => activeTab == tab ? "active" : "";
 
     protected override async Task OnInitializedAsync()
     {
-        // Ohne Anmeldung keine API-Aufrufe — der Server antwortet sonst mit 401.
-        if (!AuthState.IsAuthenticated)
-            return;
-
+        isAdministrator = (await AuthenticationState).User.IsInRole("Administrator");
         await Run(async () =>
         {
             config = await ApiService.GetConfigurationAsync();

@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using Microsoft.AspNetCore.Components.Authorization;
 using PrinterManager.Shared.DTOs;
 using PrinterManager.Shared.Models;
 
@@ -37,6 +38,7 @@ public interface IApiService
     Task<AssignmentDto> CreateAssignmentAsync(CreateAssignmentDto dto);
     Task<List<AssignmentDto>> CreateBulkAssignmentsAsync(BulkAssignmentDto dto);
     Task<bool> DeleteAssignmentAsync(int id);
+    Task<AssignmentDto> SetAssignmentAsDefaultAsync(int id);
 
     // Clients and Users
     Task<List<ClientInfo>> GetClientsAsync();
@@ -58,39 +60,44 @@ public interface IApiService
 public class ApiService : IApiService
 {
     private readonly HttpClient _httpClient;
-    private readonly AuthStateService _authState;
+    private readonly AuthenticationStateProvider _authenticationStateProvider;
 
-    public ApiService(HttpClient httpClient, AuthStateService authState)
+    public ApiService(HttpClient httpClient, AuthenticationStateProvider authenticationStateProvider)
     {
         _httpClient = httpClient;
-        _authState = authState;
+        _authenticationStateProvider = authenticationStateProvider;
     }
 
     /// <summary>
-    /// Setzt den Bearer-Token vor jedem Aufruf aus dem Zustand dieses Circuits.
+    /// Setzt den Bearer-Token vor jedem Aufruf aus dem Anmelde-Cookie des aktuellen Benutzers.
     /// </summary>
     /// <remarks>
+    /// Der <see cref="AuthenticationStateProvider"/> liefert beim Vorab-Rendern den Benutzer
+    /// der HTTP-Anfrage und in der interaktiven Verbindung den des Circuits — beides stammt aus
+    /// dem Cookie. <c>IHttpContextAccessor</c> wäre im Circuit nicht verlässlich.
     /// Bewusst kein <see cref="DelegatingHandler"/>: Handler von <c>IHttpClientFactory</c>
     /// leben in einem eigenen, über Minuten wiederverwendeten DI-Scope und würden das Token
     /// eines Benutzers an andere Verbindungen weiterreichen. Der typisierte HttpClient ist
     /// dagegen pro ApiService-Instanz eigenständig.
     /// </remarks>
-    private HttpClient Client
+    private async Task<HttpClient> AuthorizedClientAsync()
     {
-        get
-        {
-            _httpClient.DefaultRequestHeaders.Authorization = string.IsNullOrEmpty(_authState.Token)
-                ? null
-                : new AuthenticationHeaderValue("Bearer", _authState.Token);
+        var state = await _authenticationStateProvider.GetAuthenticationStateAsync();
+        var token = AccessToken.From(state.User);
 
-            return _httpClient;
-        }
+        _httpClient.DefaultRequestHeaders.Authorization = string.IsNullOrEmpty(token)
+            ? null
+            : new AuthenticationHeaderValue("Bearer", token);
+
+        return _httpClient;
     }
 
     // Auth
     public async Task<LoginResponseDto> LoginAsync(LoginDto dto)
     {
-        var response = await Client.PostAsJsonAsync("/api/auth/login", dto);
+        // Die Anmeldung selbst braucht und sendet kein Token.
+        _httpClient.DefaultRequestHeaders.Authorization = null;
+        var response = await _httpClient.PostAsJsonAsync("/api/auth/login", dto);
 
         if (!response.IsSuccessStatusCode)
         {
@@ -121,25 +128,25 @@ public class ApiService : IApiService
 
     public async Task<List<UserDto>> GetAppUsersAsync()
     {
-        return await Client.GetFromJsonAsync<List<UserDto>>("/api/auth/users") ?? new List<UserDto>();
+        return await (await AuthorizedClientAsync()).GetFromJsonAsync<List<UserDto>>("/api/auth/users") ?? new List<UserDto>();
     }
 
     public async Task<UserDto> RegisterAppUserAsync(RegisterUserDto dto)
     {
-        var response = await Client.PostAsJsonAsync("/api/auth/register", dto);
+        var response = await (await AuthorizedClientAsync()).PostAsJsonAsync("/api/auth/register", dto);
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<UserDto>())!;
     }
 
     public async Task<bool> DeleteAppUserAsync(int id)
     {
-        var response = await Client.DeleteAsync($"/api/auth/users/{id}");
+        var response = await (await AuthorizedClientAsync()).DeleteAsync($"/api/auth/users/{id}");
         return response.IsSuccessStatusCode;
     }
 
     public async Task<UserDto> UpdateUserRoleAsync(int id, string role)
     {
-        var response = await Client.PutAsJsonAsync($"/api/auth/users/{id}/role", new UpdateUserRoleDto { Role = role });
+        var response = await (await AuthorizedClientAsync()).PutAsJsonAsync($"/api/auth/users/{id}/role", new UpdateUserRoleDto { Role = role });
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<UserDto>())!;
     }
@@ -147,12 +154,12 @@ public class ApiService : IApiService
     // Security Config
     public async Task<LdapConfigDto> GetLdapConfigAsync()
     {
-        return (await Client.GetFromJsonAsync<LdapConfigDto>("/api/securityconfig/ldap"))!;
+        return (await (await AuthorizedClientAsync()).GetFromJsonAsync<LdapConfigDto>("/api/securityconfig/ldap"))!;
     }
 
     public async Task<LdapConfigDto> UpdateLdapConfigAsync(LdapConfigDto dto)
     {
-        var response = await Client.PutAsJsonAsync("/api/securityconfig/ldap", dto);
+        var response = await (await AuthorizedClientAsync()).PutAsJsonAsync("/api/securityconfig/ldap", dto);
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<LdapConfigDto>())!;
     }
@@ -160,17 +167,17 @@ public class ApiService : IApiService
     // Server-Einstellungen
     public async Task<ServerSettingsDto> GetServerSettingsAsync()
     {
-        return (await Client.GetFromJsonAsync<ServerSettingsDto>("/api/settings"))!;
+        return (await (await AuthorizedClientAsync()).GetFromJsonAsync<ServerSettingsDto>("/api/settings"))!;
     }
 
     public async Task<ServerStatusDto> GetServerStatusAsync()
     {
-        return (await Client.GetFromJsonAsync<ServerStatusDto>("/api/settings/status"))!;
+        return (await (await AuthorizedClientAsync()).GetFromJsonAsync<ServerStatusDto>("/api/settings/status"))!;
     }
 
     public async Task<SaveSettingsResultDto> UpdateServerSettingsAsync(ServerSettingsDto dto)
     {
-        var response = await Client.PutAsJsonAsync("/api/settings", dto);
+        var response = await (await AuthorizedClientAsync()).PutAsJsonAsync("/api/settings", dto);
 
         if (!response.IsSuccessStatusCode)
         {
@@ -182,7 +189,7 @@ public class ApiService : IApiService
 
     public async Task<string?> GetClientApiKeyAsync()
     {
-        var result = await Client.GetFromJsonAsync<ClientApiKeyDto>("/api/settings/client-key");
+        var result = await (await AuthorizedClientAsync()).GetFromJsonAsync<ClientApiKeyDto>("/api/settings/client-key");
         return result?.Key;
     }
 
@@ -206,108 +213,120 @@ public class ApiService : IApiService
     // Printers
     public async Task<List<PrinterDto>> GetPrintersAsync()
     {
-        return await Client.GetFromJsonAsync<List<PrinterDto>>("/api/printers") ?? new List<PrinterDto>();
+        return await (await AuthorizedClientAsync()).GetFromJsonAsync<List<PrinterDto>>("/api/printers") ?? new List<PrinterDto>();
     }
 
     public async Task<PrinterDto?> GetPrinterAsync(int id)
     {
-        return await Client.GetFromJsonAsync<PrinterDto>($"/api/printers/{id}");
+        return await (await AuthorizedClientAsync()).GetFromJsonAsync<PrinterDto>($"/api/printers/{id}");
     }
 
     public async Task<PrinterDto> CreatePrinterAsync(CreatePrinterDto dto)
     {
-        var response = await Client.PostAsJsonAsync("/api/printers", dto);
+        var response = await (await AuthorizedClientAsync()).PostAsJsonAsync("/api/printers", dto);
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<PrinterDto>())!;
     }
 
     public async Task<PrinterDto?> UpdatePrinterAsync(int id, UpdatePrinterDto dto)
     {
-        var response = await Client.PutAsJsonAsync($"/api/printers/{id}", dto);
+        var response = await (await AuthorizedClientAsync()).PutAsJsonAsync($"/api/printers/{id}", dto);
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<PrinterDto>();
     }
 
     public async Task<bool> DeletePrinterAsync(int id)
     {
-        var response = await Client.DeleteAsync($"/api/printers/{id}");
+        var response = await (await AuthorizedClientAsync()).DeleteAsync($"/api/printers/{id}");
         return response.IsSuccessStatusCode;
     }
 
     public async Task<bool> SetPrinterAvailabilityAsync(int id, bool isAvailable)
     {
-        var response = await Client.PostAsJsonAsync($"/api/printers/{id}/availability", isAvailable);
+        var response = await (await AuthorizedClientAsync()).PostAsJsonAsync($"/api/printers/{id}/availability", isAvailable);
         return response.IsSuccessStatusCode;
     }
 
     // Assignments
     public async Task<List<AssignmentDto>> GetAssignmentsAsync()
     {
-        return await Client.GetFromJsonAsync<List<AssignmentDto>>("/api/assignments") ?? new List<AssignmentDto>();
+        return await (await AuthorizedClientAsync()).GetFromJsonAsync<List<AssignmentDto>>("/api/assignments") ?? new List<AssignmentDto>();
     }
 
     public async Task<AssignmentDto> CreateAssignmentAsync(CreateAssignmentDto dto)
     {
-        var response = await Client.PostAsJsonAsync("/api/assignments", dto);
+        var response = await (await AuthorizedClientAsync()).PostAsJsonAsync("/api/assignments", dto);
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<AssignmentDto>())!;
     }
 
     public async Task<List<AssignmentDto>> CreateBulkAssignmentsAsync(BulkAssignmentDto dto)
     {
-        var response = await Client.PostAsJsonAsync("/api/assignments/bulk", dto);
+        var response = await (await AuthorizedClientAsync()).PostAsJsonAsync("/api/assignments/bulk", dto);
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<List<AssignmentDto>>())!;
     }
 
     public async Task<bool> DeleteAssignmentAsync(int id)
     {
-        var response = await Client.DeleteAsync($"/api/assignments/{id}");
+        var response = await (await AuthorizedClientAsync()).DeleteAsync($"/api/assignments/{id}");
         return response.IsSuccessStatusCode;
+    }
+
+    public async Task<AssignmentDto> SetAssignmentAsDefaultAsync(int id)
+    {
+        var response = await (await AuthorizedClientAsync()).PutAsync($"/api/assignments/{id}/set-default", null);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(await ReadErrorMessageAsync(response));
+        }
+
+        return (await response.Content.ReadFromJsonAsync<AssignmentDto>())!;
     }
 
     // Clients and Users
     public async Task<List<ClientInfo>> GetClientsAsync()
     {
-        return await Client.GetFromJsonAsync<List<ClientInfo>>("/api/clients") ?? new List<ClientInfo>();
+        return await (await AuthorizedClientAsync()).GetFromJsonAsync<List<ClientInfo>>("/api/clients") ?? new List<ClientInfo>();
     }
 
     public async Task<List<UserInfo>> GetUsersAsync()
     {
-        return await Client.GetFromJsonAsync<List<UserInfo>>("/api/clients/users") ?? new List<UserInfo>();
+        return await (await AuthorizedClientAsync()).GetFromJsonAsync<List<UserInfo>>("/api/clients/users") ?? new List<UserInfo>();
     }
 
     public async Task<bool> DeleteClientAsync(int id)
     {
-        var response = await Client.DeleteAsync($"/api/clients/{id}");
+        var response = await (await AuthorizedClientAsync()).DeleteAsync($"/api/clients/{id}");
         return response.IsSuccessStatusCode;
     }
 
     public async Task<bool> DeleteUserAsync(int id)
     {
-        var response = await Client.DeleteAsync($"/api/clients/users/{id}");
+        var response = await (await AuthorizedClientAsync()).DeleteAsync($"/api/clients/users/{id}");
         return response.IsSuccessStatusCode;
     }
 
     public async Task<List<ClientPrinterDto>> GetClientPrintersAsync(int clientId)
     {
-        return await Client.GetFromJsonAsync<List<ClientPrinterDto>>($"/api/clients/{clientId}/printers") ?? new List<ClientPrinterDto>();
+        return await (await AuthorizedClientAsync()).GetFromJsonAsync<List<ClientPrinterDto>>($"/api/clients/{clientId}/printers") ?? new List<ClientPrinterDto>();
     }
 
     public async Task<List<AssignmentDto>> GetClientAssignmentsAsync(int clientId)
     {
-        return await Client.GetFromJsonAsync<List<AssignmentDto>>($"/api/assignments/client/{clientId}") ?? new List<AssignmentDto>();
+        return await (await AuthorizedClientAsync()).GetFromJsonAsync<List<AssignmentDto>>($"/api/assignments/client/{clientId}") ?? new List<AssignmentDto>();
     }
 
     public async Task<List<AssignmentDto>> GetUserAssignmentsAsync(int userId)
     {
-        return await Client.GetFromJsonAsync<List<AssignmentDto>>($"/api/assignments/user/{userId}") ?? new List<AssignmentDto>();
+        return await (await AuthorizedClientAsync()).GetFromJsonAsync<List<AssignmentDto>>($"/api/assignments/user/{userId}") ?? new List<AssignmentDto>();
     }
 
     // Print Server Scan
     public async Task<List<ScannedPrinterDto>> ScanPrintServerAsync(PrintServerScanDto dto)
     {
-        var response = await Client.PostAsJsonAsync("/api/printserver/scan", dto);
+        var response = await (await AuthorizedClientAsync()).PostAsJsonAsync("/api/printserver/scan", dto);
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<List<ScannedPrinterDto>>() ?? new List<ScannedPrinterDto>();
     }
@@ -315,12 +334,12 @@ public class ApiService : IApiService
     // Configuration
     public async Task<SystemConfiguration> GetConfigurationAsync()
     {
-        return (await Client.GetFromJsonAsync<SystemConfiguration>("/api/configuration"))!;
+        return (await (await AuthorizedClientAsync()).GetFromJsonAsync<SystemConfiguration>("/api/configuration"))!;
     }
 
     public async Task<SystemConfiguration> UpdateConfigurationAsync(SystemConfiguration config)
     {
-        var response = await Client.PutAsJsonAsync("/api/configuration", config);
+        var response = await (await AuthorizedClientAsync()).PutAsJsonAsync("/api/configuration", config);
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<SystemConfiguration>())!;
     }

@@ -13,6 +13,7 @@ public interface IAssignmentService
     Task<AssignmentDto> CreateAssignmentAsync(CreateAssignmentDto dto);
     Task<List<AssignmentDto>> CreateBulkAssignmentsAsync(BulkAssignmentDto dto);
     Task<bool> DeleteAssignmentAsync(int id);
+    Task<AssignmentDto?> SetDefaultPrinterAsync(int id);
 }
 
 public class AssignmentService : IAssignmentService
@@ -181,6 +182,33 @@ public class AssignmentService : IAssignmentService
         _context.PrinterAssignments.Remove(assignment);
         await _context.SaveChangesAsync();
         return true;
+    }
+
+    /// <summary>
+    /// Macht eine bestehende Zuweisung zum Standarddrucker ihres Benutzers bzw. Clients.
+    /// Der bisherige Standard desselben Ziels wird zurückgesetzt; Zuweisungen des jeweils
+    /// anderen Typs bleiben unberührt, weil die Priorität erst beim Client-Abruf entscheidet.
+    /// </summary>
+    /// <returns><c>null</c>, wenn die Zuweisung nicht existiert.</returns>
+    public async Task<AssignmentDto?> SetDefaultPrinterAsync(int id)
+    {
+        var assignment = await _context.PrinterAssignments.FindAsync(id);
+        if (assignment == null)
+            return null;
+
+        var targetId = assignment.AssignmentType == AssignmentType.User ? assignment.UserId : assignment.ClientId;
+        if (targetId == null)
+        {
+            // Nur bei inkonsistenten Altdaten möglich — neue Zuweisungen prüft GetTargetId.
+            throw new InvalidOperationException(
+                $"Zuweisung {id} hat kein zu ihrem Typ passendes Ziel und kann nicht Standard werden.");
+        }
+
+        await ClearDefaultPrinterAsync(assignment.AssignmentType, targetId.Value);
+        assignment.IsDefaultPrinter = true;
+        await _context.SaveChangesAsync();
+
+        return await LoadDtoAsync(assignment.Id);
     }
 
     private async Task ClearDefaultPrinterAsync(AssignmentType assignmentType, int targetId)

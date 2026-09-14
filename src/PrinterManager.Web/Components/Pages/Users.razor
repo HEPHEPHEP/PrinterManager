@@ -1,18 +1,12 @@
 @page "/users"
 @rendermode InteractiveServer
+@attribute [Authorize]
 @inject IApiService ApiService
-@inject AuthStateService AuthState
 @inject NavigationManager Navigation
 @inject IJSRuntime JSRuntime
 
 <PageTitle>Benutzer – PrinterManager</PageTitle>
 
-@if (!AuthState.IsAuthenticated)
-{
-    <RedirectToLogin />
-}
-else
-{
 <h1>Registrierte Benutzer</h1>
 
 @if (users == null)
@@ -32,7 +26,7 @@ else
                 <th>Anzeigename</th>
                 <th>Status</th>
                 <th>Zuletzt gesehen</th>
-                @if (AuthState.Role == "Administrator")
+                @if (isAdministrator)
                 {
                     <th>Aktionen</th>
                 }
@@ -59,7 +53,7 @@ else
                         }
                     </td>
                     <td>@user.LastSeen.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss")</td>
-                    @if (AuthState.Role == "Administrator")
+                    @if (isAdministrator)
                     {
                         <td>
                             <button class="btn btn-danger btn-sm" @onclick="() => DeleteUser(user.Id)">Löschen</button>
@@ -70,17 +64,18 @@ else
         </tbody>
     </table>
 }
-}
 
 @code {
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthenticationState { get; set; } = default!;
+
+    private bool isAdministrator;
+
     private List<UserInfo>? users;
 
     protected override async Task OnInitializedAsync()
     {
-        // Ohne Anmeldung keine API-Aufrufe — der Server antwortet sonst mit 401.
-        if (!AuthState.IsAuthenticated)
-            return;
-
+        isAdministrator = (await AuthenticationState).User.IsInRole("Administrator");
         await LoadUsers();
     }
 

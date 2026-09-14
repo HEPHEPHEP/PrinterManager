@@ -1,18 +1,12 @@
 @page "/assignments"
 @rendermode InteractiveServer
+@attribute [Authorize]
 @inject IApiService ApiService
-@inject AuthStateService AuthState
 @inject NavigationManager Navigation
 @using Microsoft.AspNetCore.WebUtilities
 
 <PageTitle>Zuweisungen – PrinterManager</PageTitle>
 
-@if (!AuthState.IsAuthenticated)
-{
-    <RedirectToLogin />
-}
-else
-{
 <h1>Druckerzuweisungen verwalten</h1>
 
 @if (!string.IsNullOrEmpty(errorMessage))
@@ -228,7 +222,6 @@ else
         </tbody>
     </table>
 }
-}
 
 @code {
     private List<AssignmentDto>? assignments;
@@ -274,10 +267,6 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        // Ohne Anmeldung keine API-Aufrufe — der Server antwortet sonst mit 401.
-        if (!AuthState.IsAuthenticated)
-            return;
-
         await LoadData();
 
         // Check for query parameters

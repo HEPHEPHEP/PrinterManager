@@ -5,6 +5,9 @@
     // NavigateTo mitten im Markup läuft bei jedem Render erneut.
     protected override void OnInitialized()
     {
-        Navigation.NavigateTo("login");
+        // Normalerweise leitet schon die Authentifizierung vor dem Rendern um. Das hier greift
+        // nur, wenn eine Seite ohne gültige Anmeldung doch bis zum Router kommt.
+        var returnUrl = "/" + Navigation.ToBaseRelativePath(Navigation.Uri);
+        Navigation.NavigateTo($"login?ReturnUrl={Uri.EscapeDataString(returnUrl)}", forceLoad: true);
     }
 }
