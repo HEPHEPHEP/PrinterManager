@@ -17,8 +17,12 @@ public interface IApiService
     // Security Config
     Task<LdapConfigDto> GetLdapConfigAsync();
     Task<LdapConfigDto> UpdateLdapConfigAsync(LdapConfigDto dto);
-    Task<SslConfigDto> GetSslConfigAsync();
-    Task<SslConfigDto> UpdateSslConfigAsync(SslConfigDto dto);
+
+    // Server-Einstellungen
+    Task<ServerSettingsDto> GetServerSettingsAsync();
+    Task<ServerStatusDto> GetServerStatusAsync();
+    Task<SaveSettingsResultDto> UpdateServerSettingsAsync(ServerSettingsDto dto);
+    Task<string?> GetClientApiKeyAsync();
 
     // Printers
     Task<List<PrinterDto>> GetPrintersAsync();
@@ -153,16 +157,50 @@ public class ApiService : IApiService
         return (await response.Content.ReadFromJsonAsync<LdapConfigDto>())!;
     }
 
-    public async Task<SslConfigDto> GetSslConfigAsync()
+    // Server-Einstellungen
+    public async Task<ServerSettingsDto> GetServerSettingsAsync()
     {
-        return (await Client.GetFromJsonAsync<SslConfigDto>("/api/securityconfig/ssl"))!;
+        return (await Client.GetFromJsonAsync<ServerSettingsDto>("/api/settings"))!;
     }
 
-    public async Task<SslConfigDto> UpdateSslConfigAsync(SslConfigDto dto)
+    public async Task<ServerStatusDto> GetServerStatusAsync()
     {
-        var response = await Client.PutAsJsonAsync("/api/securityconfig/ssl", dto);
-        response.EnsureSuccessStatusCode();
-        return (await response.Content.ReadFromJsonAsync<SslConfigDto>())!;
+        return (await Client.GetFromJsonAsync<ServerStatusDto>("/api/settings/status"))!;
+    }
+
+    public async Task<SaveSettingsResultDto> UpdateServerSettingsAsync(ServerSettingsDto dto)
+    {
+        var response = await Client.PutAsJsonAsync("/api/settings", dto);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(await ReadErrorMessageAsync(response));
+        }
+
+        return (await response.Content.ReadFromJsonAsync<SaveSettingsResultDto>())!;
+    }
+
+    public async Task<string?> GetClientApiKeyAsync()
+    {
+        var result = await Client.GetFromJsonAsync<ClientApiKeyDto>("/api/settings/client-key");
+        return result?.Key;
+    }
+
+    /// <summary>Holt die Fehlermeldung des Servers, damit im UI nicht nur "400" steht.</summary>
+    private static async Task<string> ReadErrorMessageAsync(HttpResponseMessage response)
+    {
+        try
+        {
+            var problem = await response.Content.ReadFromJsonAsync<ApiErrorDto>();
+            if (!string.IsNullOrWhiteSpace(problem?.Message))
+                return problem.Message;
+        }
+        catch (Exception)
+        {
+            // Kein JSON-Body — dann bleibt nur der Statuscode.
+        }
+
+        return $"Der Server hat die Anfrage mit {(int)response.StatusCode} abgelehnt.";
     }
 
     // Printers
@@ -305,6 +343,11 @@ public class UserInfo
     public string? DisplayName { get; set; }
     public DateTime LastSeen { get; set; }
     public bool IsActive { get; set; }
+}
+
+public class ApiErrorDto
+{
+    public string? Message { get; set; }
 }
 
 public class ClientPrinterDto

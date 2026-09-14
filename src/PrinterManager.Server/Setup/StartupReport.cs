@@ -121,7 +121,7 @@ public static class StartupReport
                     ======================================================================
                     """,
                     app.Configuration[ClientAuthenticationOptions.ApiKeyKey],
-                    LocalSecrets.FileName);
+                    LocalSettingsFile.FileName);
                 break;
         }
     }

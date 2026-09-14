@@ -32,9 +32,6 @@ else
         <li class="nav-item">
             <a class="nav-link @(activeTab == "ldap" ? "active" : "")" @onclick='() => activeTab = "ldap"' style="cursor: pointer;">LDAP-Einstellungen</a>
         </li>
-        <li class="nav-item">
-            <a class="nav-link @(activeTab == "ssl" ? "active" : "")" @onclick='() => activeTab = "ssl"' style="cursor: pointer;">SSL/HTTPS</a>
-        </li>
     </ul>
 
     @if (activeTab == "users")
@@ -200,56 +197,10 @@ else
                     </EditForm>
 
                     <div class="alert alert-info mt-3">
-                        <strong>Hinweis:</strong> Wenn LDAP aktiviert ist, werden alle Login-Versuche über LDAP authentifiziert.
-                        Lokale Benutzer können sich dann nicht mehr anmelden.
-                    </div>
-                </div>
-            </div>
-        }
-    }
-    else if (activeTab == "ssl")
-    {
-        <h3>SSL/HTTPS Konfiguration</h3>
-
-        @if (sslConfig == null)
-        {
-            <p><em>Laden...</em></p>
-        }
-        else
-        {
-            <div class="card">
-                <div class="card-body">
-                    <EditForm Model="@sslConfig" OnValidSubmit="SaveSslConfig">
-                        <div class="mb-3 form-check">
-                            <InputCheckbox class="form-check-input" @bind-Value="sslConfig.Enabled" />
-                            <label class="form-check-label">HTTPS aktivieren</label>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">HTTPS Port:</label>
-                            <InputNumber class="form-control" @bind-Value="sslConfig.HttpsPort" />
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Zertifikatspfad:</label>
-                            <InputText class="form-control" @bind-Value="sslConfig.CertificatePath" placeholder="/path/to/certificate.pfx" />
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Zertifikatspasswort:</label>
-                            <InputText type="password" class="form-control" @bind-Value="sslConfig.CertificatePassword" />
-                        </div>
-                        <button type="submit" class="btn btn-primary">Einstellungen speichern</button>
-                        @if (!string.IsNullOrEmpty(sslMessage))
-                        {
-                            <div class="alert alert-success mt-3">@sslMessage</div>
-                        }
-                    </EditForm>
-
-                    <div class="alert alert-warning mt-3">
-                        <strong>Wichtig:</strong> Nach dem Aktivieren von SSL muss der Server neu gestartet werden, damit die Änderungen wirksam werden.
-                    </div>
-
-                    <div class="alert alert-info mt-3">
-                        <h6>Zertifikat erstellen:</h6>
-                        <code>dotnet dev-certs https --export-path /path/to/certificate.pfx --password IhrPasswort</code>
+                        <strong>Hinweis:</strong> Bei aktiviertem LDAP wird zuerst dort geprüft. Schlägt das
+                        fehl, versucht der Server anschließend die lokale Anmeldung — eine fehlerhafte
+                        LDAP-Konfiguration sperrt den lokalen Administrator also nicht aus.
+                        Auf Port 636 wird LDAPS verwendet, sonst StartTLS versucht.
                     </div>
                 </div>
             </div>
@@ -264,9 +215,7 @@ else
     private bool showAddForm = false;
     private RegisterUserDto newUser = new() { Username = "", Password = "" };
     private LdapConfigDto? ldapConfig;
-    private SslConfigDto? sslConfig;
     private string ldapMessage = "";
-    private string sslMessage = "";
     private string errorMessage = "";
 
     protected override async Task OnInitializedAsync()
@@ -279,7 +228,6 @@ else
         {
             await LoadUsers();
             await LoadLdapConfig();
-            await LoadSslConfig();
         }
     }
 
@@ -304,18 +252,6 @@ else
         catch (Exception ex)
         {
             errorMessage = $"LDAP-Konfiguration konnte nicht geladen werden: {ex.Message}";
-        }
-    }
-
-    private async Task LoadSslConfig()
-    {
-        try
-        {
-            sslConfig = await ApiService.GetSslConfigAsync();
-        }
-        catch (Exception ex)
-        {
-            errorMessage = $"SSL-Konfiguration konnte nicht geladen werden: {ex.Message}";
         }
     }
 
@@ -397,25 +333,6 @@ else
             catch (Exception ex)
             {
                 errorMessage = $"LDAP-Einstellungen konnten nicht gespeichert werden: {ex.Message}";
-            }
-        }
-    }
-
-    private async Task SaveSslConfig()
-    {
-        errorMessage = "";
-        sslMessage = "";
-
-        if (sslConfig != null)
-        {
-            try
-            {
-                await ApiService.UpdateSslConfigAsync(sslConfig);
-                sslMessage = "SSL-Einstellungen erfolgreich gespeichert! Bitte starten Sie den Server neu.";
-            }
-            catch (Exception ex)
-            {
-                errorMessage = $"SSL-Einstellungen konnten nicht gespeichert werden: {ex.Message}";
             }
         }
     }

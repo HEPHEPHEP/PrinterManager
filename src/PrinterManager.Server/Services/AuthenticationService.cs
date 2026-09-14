@@ -25,6 +25,9 @@ public class AuthenticationService : IAuthenticationService
     /// <summary>Mindestlänge für lokale Passwörter.</summary>
     public const int MinimumPasswordLength = 8;
 
+    /// <summary>Gültigkeit ausgestellter Tokens, sofern nichts konfiguriert ist.</summary>
+    public const int DefaultTokenLifetimeHours = 8;
+
     private const int BcryptWorkFactor = 12;
 
     /// <summary>
@@ -335,11 +338,19 @@ public class AuthenticationService : IAuthenticationService
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
 
+        // Die Gültigkeit begrenzt zugleich, wie lange eine entzogene Rolle noch wirkt —
+        // Tokens lassen sich nicht widerrufen.
+        var lifetimeHours = _configuration.GetValue("Jwt:TokenLifetimeHours", DefaultTokenLifetimeHours);
+        if (lifetimeHours is < 1 or > 720)
+        {
+            lifetimeHours = DefaultTokenLifetimeHours;
+        }
+
         var token = new JwtSecurityToken(
             issuer: _configuration["Jwt:Issuer"] ?? "PrinterManager",
             audience: _configuration["Jwt:Audience"] ?? "PrinterManager",
             claims: claims,
-            expires: DateTime.UtcNow.AddHours(8),
+            expires: DateTime.UtcNow.AddHours(lifetimeHours),
             signingCredentials: credentials
         );
 

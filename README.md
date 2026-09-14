@@ -178,9 +178,19 @@ ADMIN_PASSWORD='ein-sicheres-passwort' dotnet run --urls "http://0.0.0.0:5000"
 }
 ```
 
-Alle Geheimnisse lassen sich auch fest vorgeben (`appsettings.Production.json`,
-Umgebungsvariablen wie `Jwt__Key`) — konfigurierte Werte haben immer Vorrang vor den
-automatisch erzeugten.
+#### Rangfolge der Konfiguration
+
+Von schwach nach stark:
+
+```
+appsettings.json  <  appsettings.Local.json  <  Umgebungsvariablen  <  Kommandozeile
+                     (Oberfläche schreibt hier)
+```
+
+Die Oberfläche schreibt nach `appsettings.Local.json`. Wer einen Wert fest vorgeben will
+— etwa `Jwt__Key` aus einem Secret-Store — setzt ihn als Umgebungsvariable; er überstimmt
+dann die Oberfläche. Der Reiter **Status** zeigt an, welche Einstellungen davon betroffen
+sind.
 
 ### Client installieren
 
@@ -268,11 +278,34 @@ dotnet run --urls "http://0.0.0.0:5001"
 
 ### 4. Priorität einstellen
 
-1. Zu "Konfiguration" navigieren
+1. Zu "Einstellungen → Zuweisungen" navigieren
 2. Priorität wählen:
    - **Benutzer-Priorität**: Benutzer-Zuweisungen haben Vorrang
    - **Client-Priorität**: Client-Zuweisungen haben Vorrang
-3. "Konfiguration speichern" klicken
+3. "Speichern" klicken
+
+### 5. Server konfigurieren
+
+Unter **Einstellungen** lassen sich als Administrator alle Server-Einstellungen pflegen:
+
+| Reiter | Inhalt | Wirkt |
+|---|---|---|
+| Zuweisungen | Priorität, automatische Ersatzdrucker | sofort |
+| HTTPS | Port, Zertifikatsquelle, Umleitung | nach Neustart |
+| Client-Zugang | Verfahren (Keines/Windows/Schlüssel), Schlüssel anzeigen und neu erzeugen | nach Neustart |
+| Anmeldung | Sitzungsdauer, Issuer, Audience, Signaturschlüssel neu erzeugen | nach Neustart |
+| Netzwerk | Erlaubte Browser-Herkünfte (CORS) | nach Neustart |
+| Status | Aktives Zertifikat samt Fingerabdruck und Ablauf, aktiver Client-Zugang, überschriebene Einstellungen | — |
+
+Benutzerverwaltung und LDAP liegen weiterhin unter **Sicherheit**.
+
+Die Reiter außer „Zuweisungen" schreiben nach `appsettings.Local.json`. Diese Werte
+werden beim Start gelesen — die Oberfläche weist nach dem Speichern auf den nötigen
+Neustart hin.
+
+> Der Reiter **Status** meldet, wenn eine Einstellung durch eine Umgebungsvariable oder
+> `appsettings.Production.json` überschrieben wird. Ohne diesen Hinweis wundert man sich,
+> warum eine Änderung in der Oberfläche folgenlos bleibt.
 
 ## API-Endpunkte
 
@@ -310,8 +343,14 @@ dotnet run --urls "http://0.0.0.0:5001"
 - `POST /api/printserver/scan` - Server scannen (nur Administrator)
 
 ### Konfiguration
-- `GET /api/configuration` - Konfiguration abrufen
-- `PUT /api/configuration` - Konfiguration aktualisieren (nur Administrator)
+- `GET /api/configuration` - Zuweisungseinstellungen abrufen
+- `PUT /api/configuration` - Zuweisungseinstellungen aktualisieren (nur Administrator)
+
+### Server-Einstellungen (nur Administrator)
+- `GET /api/settings` - Einstellungen aus appsettings.Local.json
+- `GET /api/settings/status` - Laufzeitzustand: Zertifikat, aktiver Client-Zugang, überschriebene Werte
+- `GET /api/settings/client-key` - Gemeinsamen Client-Schlüssel im Klartext abrufen
+- `PUT /api/settings` - Einstellungen speichern (Neustart erforderlich)
 
 > Alle Endpunkte außer `POST /api/auth/login` und den beiden Client-Endpunkten
 > erfordern einen gültigen JWT-Token. Das erzwingt eine globale Fallback-Policy —
@@ -378,7 +417,8 @@ eine Aussperrung ist damit ausgeschlossen.
 **offen**, damit die Clients ohne Vorbereitung starten. Das ist für die Inbetriebnahme
 gedacht, nicht für den Dauerbetrieb.
 
-Gesteuert wird das über `ClientApi:Authentication`:
+Einzustellen unter **Einstellungen → Client-Zugang** oder direkt über
+`ClientApi:Authentication`:
 
 | Wert | Bedeutung |
 |---|---|
@@ -429,6 +469,10 @@ Clients aussperren. Der Schlüssel schützt den Zugang, **nicht** die Identität
 
 ### HTTPS
 
+Am bequemsten über die Oberfläche unter **Einstellungen → HTTPS**. Die folgenden Werte
+lassen sich alternativ direkt in `appsettings.Local.json` oder
+`appsettings.Production.json` setzen.
+
 Der Server bringt einen HTTPS-Endpunkt auf Port 5443 mit (`Https:Port`). Das Zertifikat
 wird in dieser Reihenfolge gesucht:
 
@@ -436,8 +480,7 @@ wird in dieser Reihenfolge gesucht:
    `Https:CertificateSubject`. Der übliche Weg in einer Domäne: das Zertifikat kommt per
    AD-CS-Autoenrollment, es ist nichts zu verteilen.
 2. **PFX-Datei** — `Https:CertificatePath` und `Https:CertificatePassword`
-3. **SSL-Konfiguration der Oberfläche** — unter „Sicherheit → SSL" gepflegt
-4. **Selbst signiert** — wird beim ersten Start erzeugt und als
+3. **Selbst signiert** — wird beim ersten Start erzeugt und als
    `printermanager-selfsigned.pfx` abgelegt
 
 Mit dem selbst signierten Zertifikat stufen Browser und Clients die Verbindung als nicht
@@ -585,10 +628,15 @@ Nach der Inbetriebnahme in dieser Reihenfolge abarbeiten:
 - **Kein Brute-Force-Schutz**: `POST /api/auth/login` ist nicht ratenbegrenzt.
   In exponierten Umgebungen empfiehlt sich Rate Limiting oder eine Sperre nach
   mehreren Fehlversuchen.
-- **Zertifikatspasswort im Klartext**: `SslConfiguration.CertificatePassword` liegt
-  unverschlüsselt in der SQLite-Datei.
-- **Rollenänderungen wirken verzögert**: JWTs sind 8 Stunden gültig und können nicht
-  widerrufen werden; eine entzogene Administratorrolle greift erst nach Ablauf.
+- **Geheimnisse im Klartext**: JWT-Schlüssel, Client-Schlüssel und ein etwaiges
+  Zertifikatspasswort liegen unverschlüsselt in `appsettings.Local.json`. Die Datei
+  sollte nur für das Dienstkonto lesbar sein.
+- **Rollenänderungen wirken verzögert**: JWTs lassen sich nicht widerrufen; eine entzogene
+  Administratorrolle greift erst nach Ablauf der Sitzungsdauer (einstellbar unter
+  Einstellungen → Anmeldung, Vorgabe 8 Stunden).
+- **Einstellungsänderungen brauchen einen Neustart**: alles außerhalb der
+  Zuweisungseinstellungen und LDAP wird beim Start gelesen. Die Oberfläche kann den
+  Server nicht selbst neu starten.
 
 ## Lizenz
 

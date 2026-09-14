@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration.EnvironmentVariables;
+using Microsoft.Extensions.Configuration.Json;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using PrinterManager.Server.Data;
@@ -11,9 +13,14 @@ using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Pflichtgeheimnisse auflösen: konfigurierte Werte haben Vorrang, fehlende werden aus
-// appsettings.Local.json ergänzt oder beim ersten Start erzeugt. Dadurch läuft eine
-// frische Installation ohne vorbereitete Umgebungsvariablen.
+// appsettings.Local.json enthält die erzeugten Geheimnisse und die über die Oberfläche
+// gepflegten Einstellungen. Die Datei wird direkt vor den Umgebungsvariablen eingehängt:
+// sie überstimmt damit appsettings.json, eine gesetzte Umgebungsvariable überstimmt aber
+// weiterhin die Oberfläche.
+InsertLocalSettingsSource(builder);
+
+// Fehlende Pflichtgeheimnisse beim ersten Start erzeugen. Dadurch läuft eine frische
+// Installation ohne vorbereitete Umgebungsvariablen.
 var secrets = LocalSecrets.Ensure(builder.Configuration, builder.Environment.ContentRootPath);
 if (secrets.Values.Count > 0)
 {
@@ -59,11 +66,14 @@ builder.Services.AddDbContext<PrinterManagerDbContext>(options =>
 // Add Authentication — der Schlüssel ist an dieser Stelle garantiert vorhanden,
 // weil LocalSecrets ihn sonst erzeugt hat.
 var jwtKey = builder.Configuration["Jwt:Key"]!;
-var clientAuthenticationMode = ClientAuthenticationOptions.GetMode(builder.Configuration);
+// Einmal beim Start festhalten und als Singleton bereitstellen: der Negotiate-Handler
+// wird nur hier registriert, ein späterer Moduswechsel darf deshalb nicht durchschlagen.
+var clientAuthentication = ClientAuthenticationOptions.Read(builder.Configuration);
+builder.Services.AddSingleton(clientAuthentication);
 
 var authentication = builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme);
 
-if (clientAuthenticationMode == ClientAuthenticationMode.Windows)
+if (clientAuthentication.Mode == ClientAuthenticationMode.Windows)
 {
     // Kerberos/NTLM für die Client-Endpunkte. Die Weboberfläche bleibt bei JWT.
     authentication.AddNegotiate();
@@ -101,6 +111,7 @@ builder.Services.AddScoped<IPrintServerScanService, PrintServerScanService>();
 builder.Services.AddScoped<IAuthenticationService, AuthenticationService>();
 builder.Services.AddScoped<ILdapService, LdapService>();
 builder.Services.AddScoped<ISecurityConfigService, SecurityConfigService>();
+builder.Services.AddScoped<IServerSettingsService, ServerSettingsService>();
 
 // Add CORS — konfigurierbar über Cors:AllowedOrigins
 var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
@@ -134,6 +145,8 @@ builder.Services.AddCors(options =>
 // HTTPS-Endpunkt samt Zertifikat einrichten (übernimmt dabei den HTTP-Endpunkt).
 var https = HttpsSetup.Configure(builder);
 
+builder.Services.AddSingleton(https);
+
 if (https.Enabled)
 {
     // Ohne festen Port müsste die Umleitung ihn aus den Serveradressen erraten.
@@ -155,7 +168,7 @@ var app = builder.Build();
 // Datenbank anlegen und beim ersten Start einen Administrator erzeugen.
 await FirstRunSetup.RunAsync(app);
 
-StartupReport.Write(app, secrets, https, clientAuthenticationMode);
+StartupReport.Write(app, secrets, https, clientAuthentication.Mode);
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
@@ -178,3 +191,28 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+
+// appsettings.Local.json direkt vor den Umgebungsvariablen einhängen, damit die
+// Rangfolge stimmt: appsettings.json < appsettings.Local.json < Umgebung < Kommandozeile.
+static void InsertLocalSettingsSource(WebApplicationBuilder builder)
+{
+    // Der Dateianbieter wird beim Build aus dem Content-Root ergänzt (EnsureDefaults).
+    var source = new JsonConfigurationSource
+    {
+        Path = LocalSettingsFile.FileName,
+        Optional = true,
+        ReloadOnChange = false
+    };
+
+    var sources = ((IConfigurationBuilder)builder.Configuration).Sources;
+    var index = sources.ToList().FindIndex(existing => existing is EnvironmentVariablesConfigurationSource);
+
+    if (index < 0)
+    {
+        sources.Add(source);
+    }
+    else
+    {
+        sources.Insert(index, source);
+    }
+}

@@ -2,9 +2,8 @@
 @rendermode InteractiveServer
 @inject IApiService ApiService
 @inject AuthStateService AuthState
-@inject NavigationManager Navigation
 
-<PageTitle>Konfiguration</PageTitle>
+<PageTitle>Einstellungen</PageTitle>
 
 @if (!AuthState.IsAuthenticated)
 {
@@ -12,105 +11,466 @@
 }
 else
 {
-<h1>Systemkonfiguration</h1>
+<h1>Einstellungen</h1>
 
-@if (config == null)
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+@if (!string.IsNullOrEmpty(successMessage))
+{
+    <div class="alert alert-success">@successMessage</div>
+}
+@if (restartRequired)
+{
+    <div class="alert alert-warning">
+        <strong>Neustart erforderlich.</strong> Die gespeicherten Server-Einstellungen werden
+        beim Start gelesen und gelten erst nach einem Neustart des Servers.
+    </div>
+}
+
+<ul class="nav nav-tabs mb-3">
+    <li class="nav-item">
+        <a class="nav-link @Active("assignments")" @onclick='() => activeTab = "assignments"' style="cursor: pointer;">Zuweisungen</a>
+    </li>
+    @if (isAdministrator)
+    {
+        <li class="nav-item">
+            <a class="nav-link @Active("https")" @onclick='() => activeTab = "https"' style="cursor: pointer;">HTTPS</a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link @Active("clients")" @onclick='() => activeTab = "clients"' style="cursor: pointer;">Client-Zugang</a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link @Active("sessions")" @onclick='() => activeTab = "sessions"' style="cursor: pointer;">Anmeldung</a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link @Active("network")" @onclick='() => activeTab = "network"' style="cursor: pointer;">Netzwerk</a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link @Active("status")" @onclick='() => activeTab = "status"' style="cursor: pointer;">Status</a>
+        </li>
+    }
+</ul>
+
+@if (activeTab == "assignments")
+{
+    @if (config == null)
+    {
+        <p><em>Laden...</em></p>
+    }
+    else
+    {
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Zuweisungspriorität</h5>
+                <p class="text-muted">
+                    Legt fest, welche Zuweisungen Vorrang haben, wenn sowohl Benutzer- als auch
+                    Client-Zuweisungen existieren.
+                </p>
+
+                <EditForm Model="@config" OnValidSubmit="SaveSystemConfiguration">
+                    <div class="mb-3">
+                        <label class="form-label">Priorität:</label>
+                        <InputSelect class="form-control" @bind-Value="config.AssignmentPriority">
+                            <option value="@AssignmentPriority.UserPriority">Benutzer-Zuweisungen haben Priorität</option>
+                            <option value="@AssignmentPriority.ClientPriority">Client-Zuweisungen haben Priorität</option>
+                        </InputSelect>
+                        <div class="form-text">
+                            @if (config.AssignmentPriority == AssignmentPriority.UserPriority)
+                            {
+                                <text>Hat der angemeldete Benutzer Zuweisungen, gelten diese. Sonst greifen die Client-Zuweisungen.</text>
+                            }
+                            else
+                            {
+                                <text>Hat der Client Zuweisungen, gelten diese. Sonst greifen die Benutzer-Zuweisungen.</text>
+                            }
+                        </div>
+                    </div>
+
+                    <div class="mb-3 form-check">
+                        <InputCheckbox class="form-check-input" @bind-Value="config.AutoAssignReplacementPrinters" />
+                        <label class="form-check-label">Ersatzdrucker automatisch zuweisen</label>
+                        <div class="form-text">
+                            Ist ein Drucker als nicht verfügbar markiert, erhalten die Clients stattdessen
+                            den ersten verfügbaren Ersatzdrucker. Die gespeicherten Zuweisungen bleiben unverändert.
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary" disabled="@isSaving">Speichern</button>
+                </EditForm>
+            </div>
+        </div>
+
+        <div class="alert alert-info mt-3">
+            Diese Einstellungen liegen in der Datenbank und wirken sofort — ohne Neustart.
+        </div>
+    }
+}
+else if (!isAdministrator)
+{
+    <div class="alert alert-danger">Nur Administratoren können die Server-Einstellungen ändern.</div>
+}
+else if (settings == null)
 {
     <p><em>Laden...</em></p>
 }
-else
+else if (activeTab == "https")
 {
     <div class="card">
         <div class="card-body">
-            <h5 class="card-title">Zuweisungspriorität</h5>
+            <h5 class="card-title">HTTPS</h5>
+
+            <EditForm Model="@settings" OnValidSubmit="SaveServerSettings">
+            <div class="mb-3 form-check">
+                <InputCheckbox class="form-check-input" @bind-Value="settings.Https.Enabled" />
+                <label class="form-check-label">HTTPS-Endpunkt bereitstellen</label>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Port:</label>
+                <InputNumber class="form-control" @bind-Value="settings.Https.Port" />
+            </div>
+
+            <h6 class="mt-4">Zertifikat</h6>
             <p class="text-muted">
-                Legt fest, welche Zuweisungen Vorrang haben, wenn sowohl Benutzer- als auch Client-Zuweisungen existieren.
+                Wird in dieser Reihenfolge gesucht. Bleibt alles leer, erzeugt der Server ein
+                selbst signiertes Zertifikat.
             </p>
 
-            <EditForm Model="@config" OnValidSubmit="SaveConfiguration">
-                <div class="mb-3">
-                    <label class="form-label">Priorität:</label>
-                    <InputSelect class="form-control" @bind-Value="config.AssignmentPriority">
-                        <option value="@AssignmentPriority.UserPriority">Benutzer-Zuweisungen haben Priorität</option>
-                        <option value="@AssignmentPriority.ClientPriority">Client-Zuweisungen haben Priorität</option>
-                    </InputSelect>
-                    <div class="form-text">
-                        @if (config.AssignmentPriority == AssignmentPriority.UserPriority)
-                        {
-                            <text>Wenn ein Benutzer angemeldet ist und Benutzer-Zuweisungen existieren, werden diese verwendet. Andernfalls werden Client-Zuweisungen verwendet.</text>
-                        }
-                        else
-                        {
-                            <text>Wenn Client-Zuweisungen existieren, werden diese verwendet. Andernfalls werden Benutzer-Zuweisungen verwendet.</text>
-                        }
-                    </div>
+            <div class="mb-3">
+                <label class="form-label">1. Fingerabdruck im Windows-Zertifikatspeicher:</label>
+                <InputText class="form-control" @bind-Value="settings.Https.CertificateThumbprint"
+                           placeholder="AB12CD34EF56..." />
+                <div class="form-text">
+                    Der übliche Weg in einer Domäne: das Zertifikat kommt per AD-CS-Autoenrollment.
                 </div>
+            </div>
 
-                <div class="mb-3">
-                    <div class="form-check">
-                        <InputCheckbox class="form-check-input" @bind-Value="config.AutoAssignReplacementPrinters" />
-                        <label class="form-check-label">
-                            Ersatzdrucker automatisch zuweisen
-                        </label>
-                        <div class="form-text">
-                            Wenn aktiviert, werden Ersatzdrucker automatisch zugewiesen, wenn der ursprüngliche Drucker als nicht verfügbar markiert wird.
-                        </div>
+            <div class="mb-3">
+                <label class="form-label">Alternativ: Antragsteller (Subject):</label>
+                <InputText class="form-control" @bind-Value="settings.Https.CertificateSubject"
+                           placeholder="printermanager.firma.de" />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">2. Pfad zu einer PFX-Datei:</label>
+                <InputText class="form-control" @bind-Value="settings.Https.CertificatePath"
+                           placeholder="C:\Zertifikate\printermanager.pfx" />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Zertifikatspasswort:</label>
+                <InputText type="password" class="form-control" @bind-Value="settings.Https.NewCertificatePassword"
+                           placeholder="@(settings.Https.HasCertificatePassword ? "gesetzt — leer lassen, um es beizubehalten" : "kein Passwort hinterlegt")" />
+                @if (settings.Https.HasCertificatePassword)
+                {
+                    <div class="form-check mt-2">
+                        <InputCheckbox class="form-check-input" @bind-Value="settings.Https.ClearCertificatePassword" />
+                        <label class="form-check-label">Hinterlegtes Passwort entfernen</label>
                     </div>
-                </div>
+                }
+            </div>
 
-                <button type="submit" class="btn btn-primary">Konfiguration speichern</button>
-            </EditForm>
+            <hr />
 
-            @if (!string.IsNullOrEmpty(message))
+            <div class="mb-3 form-check">
+                <InputCheckbox class="form-check-input" @bind-Value="settings.Https.RedirectToHttps" />
+                <label class="form-check-label">HTTP-Anfragen auf HTTPS umleiten (inkl. HSTS)</label>
+            </div>
+
+            @if (status?.CertificateIsSelfSigned == true && settings.Https.RedirectToHttps)
             {
-                <div class="alert alert-success mt-3">@message</div>
+                <div class="alert alert-warning">
+                    Der Server verwendet derzeit ein selbst signiertes Zertifikat. Mit aktivierter
+                    Umleitung laufen Clients ohne hinterlegten Fingerabdruck in Zertifikatsfehler.
+                </div>
             }
+
+            <button type="submit" class="btn btn-primary" disabled="@isSaving">Speichern</button>
+            </EditForm>
         </div>
     </div>
-
-    <div class="card mt-4">
+}
+else if (activeTab == "clients")
+{
+    <div class="card">
         <div class="card-body">
-            <h5 class="card-title">Funktionsweise</h5>
-
-            <h6 class="mt-3">Zuweisungspriorität</h6>
-            <p>
-                Die Zuweisungspriorität bestimmt, welche Drucker einem Client zugewiesen werden, wenn sowohl
-                Benutzer- als auch Client-spezifische Zuweisungen existieren:
+            <h5 class="card-title">Zugang der Client-Dienste</h5>
+            <p class="text-muted">
+                Gilt für <code>/api/clients/register</code> und <code>/api/clients/actions</code>.
+                Die Weboberfläche meldet sich davon unabhängig mit Benutzername und Passwort an.
             </p>
-            <ul>
-                <li><strong>Benutzer-Priorität:</strong> Drucker werden basierend auf dem angemeldeten Benutzer zugewiesen.
-                    Nur wenn keine Benutzer-Zuweisungen vorhanden sind, werden Client-Zuweisungen verwendet.</li>
-                <li><strong>Client-Priorität:</strong> Drucker werden basierend auf dem Client-Computer zugewiesen.
-                    Nur wenn keine Client-Zuweisungen vorhanden sind, werden Benutzer-Zuweisungen verwendet.</li>
-            </ul>
 
-            <h6 class="mt-3">Ersatzdrucker</h6>
-            <p>
-                Für jeden Drucker kann ein Ersatzdrucker definiert werden. Wenn ein Drucker als "nicht verfügbar"
-                markiert wird und ein Ersatzdrucker konfiguriert ist:
-            </p>
-            <ul>
-                <li>Der Ersatzdrucker wird automatisch allen Clients/Benutzern zugewiesen, die den ursprünglichen Drucker hatten</li>
-                <li>Wenn der ursprüngliche Drucker wieder verfügbar wird, werden die Zuweisungen automatisch wiederhergestellt</li>
-            </ul>
+            <EditForm Model="@settings" OnValidSubmit="SaveServerSettings">
+            <div class="mb-3">
+                <label class="form-label">Verfahren:</label>
+                <InputSelect class="form-control" @bind-Value="settings.ClientApi.Authentication">
+                    <option value="None">Keines — offen für jeden im Netz</option>
+                    <option value="Windows">Windows-Anmeldung (Kerberos/NTLM)</option>
+                    <option value="ApiKey">Gemeinsamer Schlüssel</option>
+                </InputSelect>
+            </div>
 
-            <h6 class="mt-3">Client-Registrierung</h6>
-            <p>
-                Clients registrieren sich automatisch beim ersten Start des PrinterManager-Client-Dienstes:
-            </p>
-            <ul>
-                <li>Hostname und UserPrincipalName werden übermittelt</li>
-                <li>Bereits installierte Drucker werden in der Datenbank erfasst</li>
-                <li>Der Client prüft regelmäßig auf neue Zuweisungen</li>
-            </ul>
+            @if (settings.ClientApi.Authentication == "None")
+            {
+                <div class="alert alert-danger">
+                    Jeder, der den Server erreicht, kann sich als beliebiger Benutzer ausgeben und
+                    dessen Druckerzuweisungen abfragen. Nur für die Inbetriebnahme gedacht.
+                </div>
+            }
+            else if (settings.ClientApi.Authentication == "Windows")
+            {
+                <div class="alert alert-success">
+                    Empfohlen in einer Domäne. Am Client ist nichts zu konfigurieren — er weist sich
+                    mit dem Kerberos-Ticket des angemeldeten Benutzers aus. Der Server übernimmt die
+                    Identität aus dem Ticket statt aus der Angabe des Clients.
+                </div>
+                <div class="alert alert-info">
+                    Voraussetzung ist ein SPN auf dem Dienstkonto des Servers, etwa<br />
+                    <code>setspn -S HTTP/printermanager.firma.de DOMAENE\SvcPrinterManager</code>
+                </div>
+            }
+            else
+            {
+                <div class="alert alert-warning">
+                    Der Schlüssel liegt bei jedem Client im Klartext und ist dort für jeden
+                    angemeldeten Benutzer lesbar. Er schützt den Zugang, nicht die Identität:
+                    wer ihn hat, kann fremde Zuweisungen abfragen.
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Gemeinsamer Schlüssel:</label>
+                    <div class="input-group">
+                        <input class="form-control font-monospace" readonly
+                               value="@(clientKey ?? (settings.ClientApi.HasKey ? "••••••••••••••••" : "kein Schlüssel hinterlegt"))" />
+                        <button class="btn btn-outline-secondary" type="button" @onclick="ShowClientKey"
+                                disabled="@(!settings.ClientApi.HasKey)">Anzeigen</button>
+                    </div>
+                    <div class="form-text">
+                        Bei jedem Client in <code>appsettings.json</code> unter <code>ClientApiKey</code> eintragen.
+                    </div>
+                </div>
+
+                <div class="mb-3 form-check">
+                    <InputCheckbox class="form-check-input" @bind-Value="settings.ClientApi.RegenerateKey" />
+                    <label class="form-check-label">Beim Speichern einen neuen Schlüssel erzeugen</label>
+                    <div class="form-text">Alle Clients müssen danach angepasst werden.</div>
+                </div>
+            }
+
+            <button type="submit" class="btn btn-primary" disabled="@isSaving">Speichern</button>
+            </EditForm>
         </div>
     </div>
+}
+else if (activeTab == "sessions")
+{
+    <div class="card">
+        <div class="card-body">
+            <h5 class="card-title">Anmeldung an der Weboberfläche</h5>
+
+            <EditForm Model="@settings" OnValidSubmit="SaveServerSettings">
+            <div class="mb-3">
+                <label class="form-label">Gültigkeit der Sitzung (Stunden):</label>
+                <InputNumber class="form-control" @bind-Value="settings.Jwt.TokenLifetimeHours" />
+                <div class="form-text">
+                    Ausgestellte Tokens lassen sich nicht widerrufen. Die Gültigkeit bestimmt damit
+                    zugleich, wie lange eine entzogene Administratorrolle noch wirkt.
+                </div>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Issuer:</label>
+                <InputText class="form-control" @bind-Value="settings.Jwt.Issuer" />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Audience:</label>
+                <InputText class="form-control" @bind-Value="settings.Jwt.Audience" />
+            </div>
+
+            <div class="mb-3 form-check">
+                <InputCheckbox class="form-check-input" @bind-Value="settings.Jwt.RegenerateKey" />
+                <label class="form-check-label">Signaturschlüssel neu erzeugen</label>
+                <div class="form-text text-danger">
+                    Meldet alle Benutzer ab. Sinnvoll, wenn der Schlüssel kompromittiert sein könnte.
+                </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary" disabled="@isSaving">Speichern</button>
+            </EditForm>
+        </div>
+    </div>
+}
+else if (activeTab == "network")
+{
+    <div class="card">
+        <div class="card-body">
+            <h5 class="card-title">Erlaubte Browser-Herkünfte (CORS)</h5>
+            <p class="text-muted">
+                Nur nötig, wenn ein Browser direkt auf die API zugreift. Die Blazor-Oberfläche ruft
+                serverseitig auf und braucht hier keinen Eintrag.
+            </p>
+
+            @for (var i = 0; i < corsOrigins.Count; i++)
+            {
+                var index = i;
+                <div class="input-group mb-2">
+                    <input class="form-control" value="@corsOrigins[index]"
+                           @oninput="e => corsOrigins[index] = e.Value?.ToString() ?? string.Empty"
+                           placeholder="https://printermanager.firma.de" />
+                    <button class="btn btn-outline-danger" type="button" @onclick="() => corsOrigins.RemoveAt(index)">
+                        Entfernen
+                    </button>
+                </div>
+            }
+
+            <button class="btn btn-outline-secondary btn-sm mb-3" type="button" @onclick="() => corsOrigins.Add(string.Empty)">
+                Herkunft hinzufügen
+            </button>
+
+            <div>
+                <button class="btn btn-primary" @onclick="SaveServerSettings" disabled="@isSaving">Speichern</button>
+            </div>
+        </div>
+    </div>
+}
+else if (activeTab == "status")
+{
+    @if (status == null)
+    {
+        <p><em>Laden...</em></p>
+    }
+    else
+    {
+        @if (status.Warnings.Any())
+        {
+            <div class="alert alert-warning">
+                <strong>Hinweise aus dem Serverstart:</strong>
+                <ul class="mb-0">
+                    @foreach (var warning in status.Warnings)
+                    {
+                        <li>@warning</li>
+                    }
+                </ul>
+            </div>
+        }
+
+        @if (status.OverriddenKeys.Any())
+        {
+            <div class="alert alert-danger">
+                <strong>Achtung:</strong> Diese Einstellungen werden von einer Umgebungsvariable oder
+                <code>appsettings.Production.json</code> überschrieben. Änderungen in dieser Oberfläche
+                bleiben dort wirkungslos:
+                <ul class="mb-0">
+                    @foreach (var key in status.OverriddenKeys)
+                    {
+                        <li><code>@key</code></li>
+                    }
+                </ul>
+            </div>
+        }
+
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Laufzeit</h5>
+                <table class="table table-sm">
+                    <tbody>
+                        <tr><th style="width: 40%">Umgebung</th><td>@status.Environment</td></tr>
+                        <tr>
+                            <th>Einstellungsdatei</th>
+                            <td>
+                                <code>@status.SettingsFilePath</code>
+                                @if (!status.SettingsFileWritable)
+                                {
+                                    <span class="badge bg-danger ms-2">nicht beschreibbar</span>
+                                }
+                            </td>
+                        </tr>
+                        <tr><th>Datenbank</th><td><code>@status.DatabaseConnection</code></td></tr>
+                        <tr>
+                            <th>Client-Zugang (aktiv)</th>
+                            <td>
+                                <span class="badge bg-@(status.ActiveClientAuthentication == "None" ? "danger" : "success")">
+                                    @status.ActiveClientAuthentication
+                                </span>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h5 class="card-title mt-4">HTTPS</h5>
+                @if (!status.HttpsActive)
+                {
+                    <div class="alert alert-warning mb-0">
+                        HTTPS ist nicht aktiv — Anmeldedaten und Tokens gehen im Klartext über das Netz.
+                    </div>
+                }
+                else
+                {
+                    <table class="table table-sm">
+                        <tbody>
+                            <tr><th style="width: 40%">Port</th><td>@status.HttpsPort</td></tr>
+                            <tr>
+                                <th>Zertifikatsquelle</th>
+                                <td>
+                                    @status.CertificateSource
+                                    @if (status.CertificateIsSelfSigned)
+                                    {
+                                        <span class="badge bg-warning ms-2">nicht vertrauenswürdig</span>
+                                    }
+                                </td>
+                            </tr>
+                            <tr><th>Antragsteller</th><td>@(status.CertificateSubject ?? "-")</td></tr>
+                            <tr>
+                                <th>Fingerabdruck</th>
+                                <td><code class="user-select-all">@(status.CertificateThumbprint ?? "-")</code></td>
+                            </tr>
+                            <tr>
+                                <th>Gültig bis</th>
+                                <td>
+                                    @(status.CertificateExpiresAt?.ToString("dd.MM.yyyy") ?? "-")
+                                    @if (status.CertificateExpiresAt is { } expiry && expiry < DateTime.Now.AddDays(30))
+                                    {
+                                        <span class="badge bg-danger ms-2">läuft ab</span>
+                                    }
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    @if (status.CertificateIsSelfSigned)
+                    {
+                        <div class="alert alert-info mb-0">
+                            Solange ein selbst signiertes Zertifikat verwendet wird, kann der Fingerabdruck
+                            bei Client und Web-Anwendung unter <code>ServerCertificateThumbprint</code>
+                            hinterlegt werden — das ist die Alternative dazu, die Zertifikatsprüfung abzuschalten.
+                        </div>
+                    }
+                }
+            </div>
+        </div>
+    }
 }
 }
 
 @code {
     private SystemConfiguration? config;
-    private string message = "";
+    private ServerSettingsDto? settings;
+    private ServerStatusDto? status;
+    private List<string> corsOrigins = new();
+
+    private string activeTab = "assignments";
+    private string errorMessage = "";
+    private string successMessage = "";
+    private string? clientKey;
+    private bool restartRequired;
+    private bool isSaving;
+
+    private bool isAdministrator => AuthState.Role == "Administrator";
+
+    private string Active(string tab) => activeTab == tab ? "active" : "";
 
     protected override async Task OnInitializedAsync()
     {
@@ -118,20 +478,91 @@ else
         if (!AuthState.IsAuthenticated)
             return;
 
-        config = await ApiService.GetConfigurationAsync();
+        await Run(async () =>
+        {
+            config = await ApiService.GetConfigurationAsync();
+
+            if (isAdministrator)
+            {
+                await LoadServerSettings();
+            }
+        });
     }
 
-    private async Task SaveConfiguration()
+    private async Task LoadServerSettings()
     {
-        if (config != null)
-        {
-            await ApiService.UpdateConfigurationAsync(config);
-            message = "Konfiguration erfolgreich gespeichert!";
-            StateHasChanged();
+        settings = await ApiService.GetServerSettingsAsync();
+        status = await ApiService.GetServerStatusAsync();
+        corsOrigins = settings.CorsAllowedOrigins.ToList();
+        clientKey = null;
+    }
 
-            await Task.Delay(3000);
-            message = "";
-            StateHasChanged();
+    private async Task SaveSystemConfiguration()
+    {
+        if (config == null)
+            return;
+
+        await Run(async () =>
+        {
+            config = await ApiService.UpdateConfigurationAsync(config);
+            successMessage = "Zuweisungseinstellungen gespeichert.";
+        });
+    }
+
+    private async Task SaveServerSettings()
+    {
+        if (settings == null)
+            return;
+
+        await Run(async () =>
+        {
+            settings.CorsAllowedOrigins = corsOrigins
+                .Where(o => !string.IsNullOrWhiteSpace(o))
+                .ToList();
+
+            var result = await ApiService.UpdateServerSettingsAsync(settings);
+
+            if (result.ChangedKeys.Count == 0)
+            {
+                successMessage = "Keine Änderungen zu speichern.";
+                return;
+            }
+
+            restartRequired = result.RestartRequired;
+            successMessage = $"{result.ChangedKeys.Count} Einstellung(en) gespeichert.";
+
+            // Neu laden, damit Kennzeichen wie "Passwort gesetzt" wieder stimmen.
+            await LoadServerSettings();
+
+            // Der frisch erzeugte Schlüssel wird einmal angezeigt, damit er zu den
+            // Clients übertragen werden kann.
+            clientKey = result.NewClientApiKey;
+        });
+    }
+
+    private async Task ShowClientKey()
+    {
+        await Run(async () => clientKey = await ApiService.GetClientApiKeyAsync());
+    }
+
+    /// <summary>Führt eine API-Aktion aus und macht Fehler im UI sichtbar.</summary>
+    private async Task Run(Func<Task> action)
+    {
+        errorMessage = "";
+        successMessage = "";
+        isSaving = true;
+
+        try
+        {
+            await action();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+        finally
+        {
+            isSaving = false;
         }
     }
 }

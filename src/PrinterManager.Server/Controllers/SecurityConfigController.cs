@@ -37,25 +37,4 @@ public class SecurityConfigController : ControllerBase
             return BadRequest(new { message = ex.Message });
         }
     }
-
-    [HttpGet("ssl")]
-    public async Task<ActionResult<SslConfigDto>> GetSslConfig()
-    {
-        var config = await _securityConfigService.GetSslConfigAsync();
-        return Ok(config);
-    }
-
-    [HttpPut("ssl")]
-    public async Task<ActionResult<SslConfigDto>> UpdateSslConfig([FromBody] SslConfigDto dto)
-    {
-        try
-        {
-            var config = await _securityConfigService.UpdateSslConfigAsync(dto);
-            return Ok(config);
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(new { message = ex.Message });
-        }
-    }
 }

@@ -1,6 +1,3 @@
-using Microsoft.EntityFrameworkCore;
-using PrinterManager.Server.Data;
-using PrinterManager.Shared.Models;
 using System.Net;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -13,11 +10,13 @@ public sealed record HttpsSetupResult(
     int Port,
     string Source,
     string? Thumbprint,
+    string? Subject,
+    DateTime? ExpiresAt,
     bool IsSelfSigned,
     IReadOnlyList<string> Warnings)
 {
     public static HttpsSetupResult Off(params string[] warnings) =>
-        new(false, 0, "deaktiviert", null, false, warnings);
+        new(false, 0, "deaktiviert", null, null, null, false, warnings);
 }
 
 /// <summary>
@@ -80,7 +79,8 @@ public static class HttpsSetup
         });
 
         return new HttpsSetupResult(
-            true, port, source, certificate.Thumbprint, isSelfSigned, warnings);
+            true, port, source, certificate.Thumbprint, certificate.Subject,
+            certificate.NotAfter, isSelfSigned, warnings);
     }
 
     private static X509Certificate2? Resolve(
@@ -118,19 +118,7 @@ public static class HttpsSetup
             }
         }
 
-        // 3. Über die Oberfläche gepflegte SSL-Konfiguration
-        var stored = ReadStoredConfiguration(configuration, warnings);
-        if (stored is { Enabled: true } && !string.IsNullOrWhiteSpace(stored.CertificatePath))
-        {
-            var fromDb = LoadFromFile(stored.CertificatePath, stored.CertificatePassword, warnings);
-            if (fromDb != null)
-            {
-                source = $"SSL-Konfiguration der Oberfläche ({stored.CertificatePath})";
-                return fromDb;
-            }
-        }
-
-        // 4. Selbst signiertes Zertifikat, damit HTTPS ohne Vorbereitung nutzbar ist
+        // 3. Selbst signiertes Zertifikat, damit HTTPS ohne Vorbereitung nutzbar ist
         isSelfSigned = true;
         source = "selbst signiert";
         return LoadOrCreateSelfSigned(contentRootPath, warnings);
@@ -199,34 +187,6 @@ public static class HttpsSetup
         }
     }
 
-    /// <summary>
-    /// Liest die über die Oberfläche gepflegte SSL-Konfiguration. Läuft vor dem Aufbau des
-    /// Hosts, deshalb mit einem eigenen, kurzlebigen DbContext.
-    /// </summary>
-    private static SslConfiguration? ReadStoredConfiguration(
-        IConfiguration configuration, List<string> warnings)
-    {
-        try
-        {
-            var options = new DbContextOptionsBuilder<PrinterManagerDbContext>()
-                .UseSqlite(configuration.GetConnectionString("DefaultConnection"))
-                .Options;
-
-            using var db = new PrinterManagerDbContext(options);
-
-            // Beim allerersten Start existiert die Datenbank noch nicht.
-            if (!db.Database.CanConnect())
-                return null;
-
-            return db.SslConfigurations.AsNoTracking().FirstOrDefault();
-        }
-        catch (Exception ex)
-        {
-            warnings.Add($"SSL-Konfiguration konnte nicht gelesen werden: {ex.Message}");
-            return null;
-        }
-    }
-
     private static X509Certificate2? LoadOrCreateSelfSigned(string contentRootPath, List<string> warnings)
     {
         var path = Path.Combine(contentRootPath, SelfSignedFileName);
@@ -246,7 +206,7 @@ public static class HttpsSetup
             var export = certificate.Export(X509ContentType.Pfx);
 
             File.WriteAllBytes(path, export);
-            LocalSecrets.RestrictToOwner(path);
+            LocalSettingsFile.RestrictToOwner(path);
 
             return new X509Certificate2(export, (string?)null);
         }

@@ -23,11 +23,21 @@ public enum ClientAuthenticationMode
     Windows
 }
 
+/// <summary>
+/// Beim Start festgehaltener Zustand. Bewusst nicht bei jeder Anfrage neu aus der
+/// Konfiguration gelesen: der Negotiate-Handler wird nur beim Start registriert, ein
+/// nachträglicher Wechsel auf "Windows" liefe sonst ins Leere.
+/// </summary>
+public sealed record ClientAuthenticationSettings(ClientAuthenticationMode Mode, string? ApiKey);
+
 public static class ClientAuthenticationOptions
 {
     public const string ModeKey = "ClientApi:Authentication";
     public const string ApiKeyKey = "ClientApi:Key";
     public const string HeaderName = "X-Client-Key";
+
+    public static ClientAuthenticationSettings Read(IConfiguration configuration) =>
+        new(GetMode(configuration), configuration[ApiKeyKey]);
 
     public static ClientAuthenticationMode GetMode(IConfiguration configuration)
     {
@@ -72,10 +82,11 @@ public sealed class ClientAuthenticationFilter : IAsyncAuthorizationFilter
     private readonly string? _expectedKey;
     private readonly ILogger<ClientAuthenticationFilter> _logger;
 
-    public ClientAuthenticationFilter(IConfiguration configuration, ILogger<ClientAuthenticationFilter> logger)
+    public ClientAuthenticationFilter(
+        ClientAuthenticationSettings settings, ILogger<ClientAuthenticationFilter> logger)
     {
-        _mode = ClientAuthenticationOptions.GetMode(configuration);
-        _expectedKey = configuration[ClientAuthenticationOptions.ApiKeyKey];
+        _mode = settings.Mode;
+        _expectedKey = settings.ApiKey;
         _logger = logger;
     }
 

@@ -9,8 +9,6 @@ public interface ISecurityConfigService
 {
     Task<LdapConfigDto> GetLdapConfigAsync();
     Task<LdapConfigDto> UpdateLdapConfigAsync(LdapConfigDto dto);
-    Task<SslConfigDto> GetSslConfigAsync();
-    Task<SslConfigDto> UpdateSslConfigAsync(SslConfigDto dto);
 }
 
 public class SecurityConfigService : ISecurityConfigService
@@ -55,33 +53,6 @@ public class SecurityConfigService : ISecurityConfigService
         return ToDto(config);
     }
 
-    public async Task<SslConfigDto> GetSslConfigAsync()
-    {
-        return ToDto(await GetOrCreateSslConfigAsync());
-    }
-
-    public async Task<SslConfigDto> UpdateSslConfigAsync(SslConfigDto dto)
-    {
-        if (dto.HttpsPort is < 1 or > 65535)
-            throw new ArgumentException("Der HTTPS-Port muss zwischen 1 und 65535 liegen.");
-
-        var config = await GetOrCreateSslConfigAsync();
-        config.Enabled = dto.Enabled;
-        config.HttpsPort = dto.HttpsPort;
-
-        if (!string.IsNullOrEmpty(dto.CertificatePath))
-            config.CertificatePath = dto.CertificatePath;
-
-        if (!string.IsNullOrEmpty(dto.CertificatePassword))
-            config.CertificatePassword = dto.CertificatePassword;
-
-        config.LastModified = DateTime.UtcNow;
-
-        await _context.SaveChangesAsync();
-
-        return ToDto(config);
-    }
-
     private async Task<LdapConfiguration> GetOrCreateLdapConfigAsync()
     {
         var config = await _context.LdapConfigurations.FirstOrDefaultAsync();
@@ -94,18 +65,6 @@ public class SecurityConfigService : ISecurityConfigService
         return config;
     }
 
-    private async Task<SslConfiguration> GetOrCreateSslConfigAsync()
-    {
-        var config = await _context.SslConfigurations.FirstOrDefaultAsync();
-        if (config != null)
-            return config;
-
-        config = new SslConfiguration { Id = 1 };
-        _context.SslConfigurations.Add(config);
-        await _context.SaveChangesAsync();
-        return config;
-    }
-
     private static LdapConfigDto ToDto(LdapConfiguration config) => new()
     {
         Enabled = config.Enabled,
@@ -113,13 +72,5 @@ public class SecurityConfigService : ISecurityConfigService
         Port = config.Port,
         BaseDn = config.BaseDn,
         UserDnTemplate = config.UserDnTemplate
-    };
-
-    // CertificatePassword wird bewusst NICHT zurückgegeben.
-    private static SslConfigDto ToDto(SslConfiguration config) => new()
-    {
-        Enabled = config.Enabled,
-        HttpsPort = config.HttpsPort,
-        CertificatePath = config.CertificatePath
     };
 }

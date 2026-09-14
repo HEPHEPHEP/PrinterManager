@@ -18,7 +18,6 @@ public class PrinterManagerDbContext : DbContext
     public DbSet<SystemConfiguration> SystemConfigurations => Set<SystemConfiguration>();
     public DbSet<ApplicationUser> ApplicationUsers => Set<ApplicationUser>();
     public DbSet<LdapConfiguration> LdapConfigurations => Set<LdapConfiguration>();
-    public DbSet<SslConfiguration> SslConfigurations => Set<SslConfiguration>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -122,12 +121,6 @@ public class PrinterManagerDbContext : DbContext
             entity.HasKey(e => e.Id);
         });
 
-        // SslConfiguration
-        modelBuilder.Entity<SslConfiguration>(entity =>
-        {
-            entity.HasKey(e => e.Id);
-        });
-
         // Der Admin-Benutzer wird bewusst nicht per Seed mit festem Hash angelegt,
         // sondern beim ersten Start erzeugt (siehe FirstRunSetup) — mit einem
         // erzeugten Passwort oder dem Wert aus ADMIN_PASSWORD.
@@ -142,16 +135,6 @@ public class PrinterManagerDbContext : DbContext
                 Port = 389,
                 BaseDn = "",
                 UserDnTemplate = ""
-            }
-        );
-
-        // Seed default SSL configuration
-        modelBuilder.Entity<SslConfiguration>().HasData(
-            new SslConfiguration
-            {
-                Id = 1,
-                Enabled = false,
-                HttpsPort = 5443
             }
         );
     }

@@ -86,7 +86,7 @@ public static class FirstRunSetup
                 $"{password}{Environment.NewLine}{Environment.NewLine}" +
                 $"Diese Datei nach der ersten Anmeldung löschen.{Environment.NewLine}");
 
-            LocalSecrets.RestrictToOwner(path);
+            LocalSettingsFile.RestrictToOwner(path);
             return path;
         }
         catch (Exception ex)

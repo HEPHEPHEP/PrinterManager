@@ -10,13 +10,3 @@ public class LdapConfiguration
     public string UserDnTemplate { get; set; } = "";
     public DateTime LastModified { get; set; } = DateTime.UtcNow;
 }
-
-public class SslConfiguration
-{
-    public int Id { get; set; }
-    public bool Enabled { get; set; }
-    public int HttpsPort { get; set; } = 5443;
-    public string? CertificatePath { get; set; }
-    public string? CertificatePassword { get; set; }
-    public DateTime LastModified { get; set; } = DateTime.UtcNow;
-}
