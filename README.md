@@ -7,7 +7,7 @@ Ein umfassendes Druckerverwaltungssystem für Windows-Umgebungen, bestehend aus 
 Der Windows Printer Manager ermöglicht die zentrale Verwaltung von Netzwerkdruckern über SMB-Freigaben. Das System besteht aus drei Hauptkomponenten:
 
 1. **Management Server** - REST API Backend (ASP.NET Core)
-2. **Client Module** - Windows Service für automatische Druckerinstallation
+2. **Client Module** - Autostart-Anwendung im Benutzerkontext für automatische Druckerinstallation
 3. **Web Application** - Blazor Server UI für Verwaltung
 <img width="1909" height="495" alt="grafik" src="https://github.com/user-attachments/assets/42c5f3a0-2820-4193-b557-a75516344973" />
 
@@ -38,11 +38,12 @@ Der Windows Printer Manager ermöglicht die zentrale Verwaltung von Netzwerkdruc
 - ✅ Automatische Wiederherstellung bei Verfügbarkeit
 
 ### Sicherheit & Authentifizierung
-- ✅ JWT-basierte Authentifizierung
+- ✅ JWT-basierte Authentifizierung — **alle** API-Endpunkte sind per Fallback-Policy geschützt
 - ✅ Rollenbasierte Zugriffskontrolle (Administrator, Benutzer)
-- ✅ Optionale LDAP/Active Directory-Integration
+- ✅ Client-Endpunkte über gemeinsamen Schlüssel (`X-Client-Key`) abgesichert
+- ✅ Optionale LDAP/Active Directory-Integration (LDAPS bzw. StartTLS)
 - ✅ HTTPS/SSL-Verschlüsselung
-- ✅ Passwort-Hashing (SHA256)
+- ✅ Passwort-Hashing mit BCrypt (Work Factor 12); alte SHA256-Hashes werden beim Login migriert
 - ✅ Benutzerverwaltung über Web-Interface
 
 ## Architektur
@@ -121,13 +122,26 @@ dotnet build -c Release
 {
   "ConnectionStrings": {
     "DefaultConnection": "Data Source=printermanager.db"
+  },
+  "Jwt": {
+    "Key": "MINDESTENS_32_ZEICHEN_LANGER_GEHEIMER_SCHLUESSEL"
+  },
+  "Cors": {
+    "AllowedOrigins": [ "https://printermanager.meinefirma.de" ]
+  },
+  "ClientApi": {
+    "Key": "zufaelliger-schluessel-fuer-die-clients"
   }
 }
 ```
 
-3. Server starten:
+`Jwt:Key` ist Pflicht (min. 32 Zeichen) — ohne ihn startet der Server nicht.
+Ist `ClientApi:Key` leer, sind die Client-Endpunkte unauthentifiziert erreichbar;
+der Server warnt dann beim Start.
+
+3. Server starten (Admin-Passwort nur beim allerersten Start nötig):
 ```bash
-dotnet run --urls "http://0.0.0.0:5000"
+ADMIN_PASSWORD='ein-sicheres-passwort' dotnet run --urls "http://0.0.0.0:5000"
 ```
 
 ### Client installieren
@@ -142,15 +156,20 @@ dotnet publish -c Release -r win-x64 --self-contained
 ```json
 {
   "ServerUrl": "http://server-ip:5000",
+  "ClientApiKey": "derselbe-wert-wie-ClientApi:Key-auf-dem-Server",
   "PollIntervalSeconds": 60
 }
 ```
 
-3. Als Windows Service installieren:
+3. Starten — der Client trägt sich beim ersten Start selbst in den Autostart des
+   angemeldeten Benutzers ein (`HKCU\...\Run`):
 ```powershell
-sc.exe create "PrinterManager Client" binPath="C:\Path\To\PrinterManager.Client.exe"
-sc.exe start "PrinterManager Client"
+C:\Path\To\PrinterManager.Client.exe
 ```
+
+> Der Client läuft bewusst **nicht** als Windows-Dienst: Druckerverbindungen sind
+> benutzer- und sitzungsgebunden und wären aus dem `LocalSystem`-Kontext heraus für
+> den angemeldeten Benutzer nicht sichtbar.
 
 ### Web-Anwendung installieren
 
@@ -225,30 +244,37 @@ dotnet run --urls "http://0.0.0.0:5001"
 ### Drucker
 - `GET /api/printers` - Alle Drucker auflisten
 - `GET /api/printers/{id}` - Drucker Details
-- `POST /api/printers` - Neuen Drucker erstellen
-- `PUT /api/printers/{id}` - Drucker aktualisieren
-- `DELETE /api/printers/{id}` - Drucker löschen
-- `POST /api/printers/{id}/availability` - Verfügbarkeit setzen
+- `POST /api/printers` - Neuen Drucker erstellen (nur Administrator)
+- `PUT /api/printers/{id}` - Drucker aktualisieren (nur Administrator)
+- `DELETE /api/printers/{id}` - Drucker löschen (nur Administrator)
+- `POST /api/printers/{id}/availability` - Verfügbarkeit setzen (nur Administrator)
 
 ### Zuweisungen
 - `GET /api/assignments` - Alle Zuweisungen
 - `GET /api/assignments/user/{userId}` - Benutzer-Zuweisungen
 - `GET /api/assignments/client/{clientId}` - Client-Zuweisungen
-- `POST /api/assignments` - Neue Zuweisung
-- `DELETE /api/assignments/{id}` - Zuweisung löschen
+- `POST /api/assignments` - Neue Zuweisung (nur Administrator)
+- `POST /api/assignments/bulk` - Mehrere Zuweisungen (nur Administrator)
+- `DELETE /api/assignments/{id}` - Zuweisung löschen (nur Administrator)
 
 ### Clients
-- `POST /api/clients/register` - Client registrieren
-- `GET /api/clients/actions` - Drucker-Aktionen für Client
+- `POST /api/clients/register` - Client registrieren (Client-Schlüssel statt JWT)
+- `GET /api/clients/actions` - Drucker-Aktionen für Client (Client-Schlüssel statt JWT)
 - `GET /api/clients` - Alle Clients
 - `GET /api/clients/users` - Alle Benutzer
+- `DELETE /api/clients/{id}` - Client löschen (nur Administrator)
+- `DELETE /api/clients/users/{id}` - Benutzer löschen (nur Administrator)
 
 ### Druckerserver
-- `POST /api/printserver/scan` - Server scannen
+- `POST /api/printserver/scan` - Server scannen (nur Administrator)
 
 ### Konfiguration
 - `GET /api/configuration` - Konfiguration abrufen
-- `PUT /api/configuration` - Konfiguration aktualisieren
+- `PUT /api/configuration` - Konfiguration aktualisieren (nur Administrator)
+
+> Alle Endpunkte außer `POST /api/auth/login` und den beiden Client-Endpunkten
+> erfordern einen gültigen JWT-Token. Das erzwingt eine globale Fallback-Policy —
+> ein neuer Controller ist damit automatisch geschützt.
 
 ## Datenbank-Schema
 
@@ -281,17 +307,31 @@ dotnet run --urls "http://0.0.0.0:5001"
 
 ### Ersatzdrucker-Logik
 1. Administrator markiert Drucker als "nicht verfügbar"
-2. Server ermittelt alle Zuweisungen für diesen Drucker
-3. Server erstellt temporäre Zuweisungen für Ersatzdrucker
-4. Bei nächstem Poll installieren Clients den Ersatzdrucker
-5. Beim Reaktivieren werden Original-Zuweisungen wiederhergestellt
+2. Beim nächsten Poll löst der Server die Zuweisung auf den ersten verfügbaren
+   Drucker der Ersatzdrucker-Kette auf — die gespeicherten Zuweisungen bleiben unverändert
+3. Clients installieren den Ersatzdrucker und entfernen den Originaldrucker
+4. Beim Reaktivieren greift automatisch wieder der Originaldrucker
+
+> Die Auflösung passiert zur Laufzeit, es werden keine zusätzlichen Zuweisungen in der
+> Datenbank angelegt. Zyklen in der Ersatzdrucker-Kette werden beim Speichern abgelehnt.
+> Die Auflösung lässt sich über `AutoAssignReplacementPrinters` in der Konfiguration abschalten.
 
 ## Sicherheitskonfiguration
 
-### Standard-Anmeldung
-- **Benutzername**: admin
-- **Passwort**: admin
-- **⚠️ WICHTIG**: Ändern Sie das Admin-Passwort sofort nach der ersten Anmeldung!
+### Erst-Anmeldung
+
+Es gibt **kein** Standardpasswort. Beim ersten Start legt der Server den Benutzer `admin`
+mit dem Passwort aus der Umgebungsvariable `ADMIN_PASSWORD` an (mindestens 8 Zeichen).
+Ist sie nicht gesetzt und existiert noch kein Administrator, bricht der Start mit einer
+Fehlermeldung ab.
+
+```bash
+export ADMIN_PASSWORD='ein-sicheres-passwort'
+dotnet run
+```
+
+Der letzte verbleibende Administrator kann weder gelöscht noch herabgestuft werden —
+damit ist eine Aussperrung ausgeschlossen.
 
 ### JWT-Konfiguration
 
@@ -374,11 +414,27 @@ Zwei Benutzerrollen verfügbar:
 
 ### API-Authentifizierung
 
-Alle API-Endpunkte (außer `/api/auth/login`) erfordern einen gültigen JWT-Token:
+Alle API-Endpunkte erfordern einen gültigen JWT-Token. Ausgenommen sind nur
+`POST /api/auth/login` sowie die beiden Client-Endpunkte, die stattdessen den
+gemeinsamen Client-Schlüssel verwenden.
 
 ```bash
 curl -H "Authorization: Bearer YOUR_JWT_TOKEN" https://server:5443/api/printers
 ```
+
+### Client-Authentifizierung
+
+Der Client-Dienst besitzt kein JWT. Er authentifiziert sich mit dem gemeinsamen
+Schlüssel aus `ClientApi:Key`:
+
+```bash
+curl -H "X-Client-Key: IHR_CLIENT_SCHLUESSEL" \
+     "https://server:5443/api/clients/actions?hostname=PC01&userPrincipalName=user@firma.de"
+```
+
+Ist `ClientApi:Key` nicht gesetzt, bleiben diese Endpunkte offen — das ist nur als
+Übergang für bestehende Installationen gedacht und sollte in Produktivumgebungen
+nicht so bleiben.
 
 ### Swagger/OpenAPI
 
@@ -392,13 +448,33 @@ JWT-Token im Swagger UI verwenden:
 ## Sicherheitshinweise
 
 - 🔒 **HTTPS verwenden**: In Produktivumgebungen nur HTTPS aktivieren
-- 🔒 **JWT-Key ändern**: Standard-Key muss geändert werden
-- 🔒 **Admin-Passwort ändern**: Sofort nach Installation
+- 🔒 **JWT-Key setzen**: Pflichtfeld, mindestens 32 Zeichen, pro Umgebung unterschiedlich
+- 🔒 **Client-Schlüssel setzen**: `ClientApi:Key` auf dem Server, `ClientApiKey` beim Client
+- 🔒 **Admin-Passwort**: über `ADMIN_PASSWORD` beim ersten Start vergeben
+- 🔒 **CORS einschränken**: `Cors:AllowedOrigins` in Produktivumgebungen befüllen
 - 🔒 **Firewall-Regeln**: Nur notwendige Ports öffnen
 - 🔒 **Client-Kommunikation**: Client-API sollte nur intern erreichbar sein
 - 🔒 **Datenbankzugriff**: SQLite-Datei mit Dateisystemberechtigungen schützen
-- 🔒 **LDAP-Verbindung**: LDAPS (Port 636) für verschlüsselte Verbindungen verwenden
+- 🔒 **LDAP-Verbindung**: LDAPS (Port 636) verwenden; auf Port 389 wird StartTLS versucht
+  und bei Misserfolg gewarnt
 - 🔒 **Regelmäßige Updates**: .NET und Abhängigkeiten aktuell halten
+
+## Bekannte Einschränkungen
+
+- **Kein Migrationsmodell**: Das Schema wird mit `EnsureCreated()` angelegt. Änderungen
+  am Datenmodell werden auf bestehenden Datenbanken **nicht** nachgezogen — für
+  weitere Schemaänderungen sollte auf EF-Core-Migrationen umgestellt werden
+  (`dotnet ef migrations add …` + `Database.Migrate()`).
+- **Keine automatisierten Tests**: Die Lösung enthält kein Testprojekt. Besonders
+  lohnend wären Tests für die Zuweisungs-Priorität, die Ersatzdrucker-Auflösung und
+  das Escaping in `PrinterManagementService`/`LdapService`.
+- **Kein Brute-Force-Schutz**: `POST /api/auth/login` ist nicht ratenbegrenzt.
+  In exponierten Umgebungen empfiehlt sich Rate Limiting oder eine Sperre nach
+  mehreren Fehlversuchen.
+- **Zertifikatspasswort im Klartext**: `SslConfiguration.CertificatePassword` liegt
+  unverschlüsselt in der SQLite-Datei.
+- **Rollenänderungen wirken verzögert**: JWTs sind 8 Stunden gültig und können nicht
+  widerrufen werden; eine entzogene Administratorrolle greift erst nach Ablauf.
 
 ## Lizenz
 

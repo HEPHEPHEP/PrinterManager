@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using PrinterManager.Server.Services;
 using PrinterManager.Shared.DTOs;
@@ -6,6 +7,7 @@ namespace PrinterManager.Server.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class AssignmentsController : ControllerBase
 {
     private readonly IAssignmentService _assignmentService;
@@ -37,20 +39,37 @@ public class AssignmentsController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Roles = "Administrator")]
     public async Task<ActionResult<AssignmentDto>> Create([FromBody] CreateAssignmentDto dto)
     {
-        var assignment = await _assignmentService.CreateAssignmentAsync(dto);
-        return CreatedAtAction(nameof(GetAll), new { id = assignment.Id }, assignment);
+        try
+        {
+            var assignment = await _assignmentService.CreateAssignmentAsync(dto);
+            return CreatedAtAction(nameof(GetAll), new { id = assignment.Id }, assignment);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [HttpPost("bulk")]
+    [Authorize(Roles = "Administrator")]
     public async Task<ActionResult<List<AssignmentDto>>> CreateBulk([FromBody] BulkAssignmentDto dto)
     {
-        var assignments = await _assignmentService.CreateBulkAssignmentsAsync(dto);
-        return Ok(assignments);
+        try
+        {
+            var assignments = await _assignmentService.CreateBulkAssignmentsAsync(dto);
+            return Ok(assignments);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [HttpDelete("{id}")]
+    [Authorize(Roles = "Administrator")]
     public async Task<ActionResult> Delete(int id)
     {
         var result = await _assignmentService.DeleteAssignmentAsync(id);

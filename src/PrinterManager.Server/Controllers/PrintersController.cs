@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using PrinterManager.Server.Services;
 using PrinterManager.Shared.DTOs;
@@ -6,6 +7,7 @@ namespace PrinterManager.Server.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class PrintersController : ControllerBase
 {
     private readonly IPrinterService _printerService;
@@ -33,23 +35,40 @@ public class PrintersController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Roles = "Administrator")]
     public async Task<ActionResult<PrinterDto>> Create([FromBody] CreatePrinterDto dto)
     {
-        var printer = await _printerService.CreatePrinterAsync(dto);
-        return CreatedAtAction(nameof(GetById), new { id = printer.Id }, printer);
+        try
+        {
+            var printer = await _printerService.CreatePrinterAsync(dto);
+            return CreatedAtAction(nameof(GetById), new { id = printer.Id }, printer);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [HttpPut("{id}")]
+    [Authorize(Roles = "Administrator")]
     public async Task<ActionResult<PrinterDto>> Update(int id, [FromBody] UpdatePrinterDto dto)
     {
-        var printer = await _printerService.UpdatePrinterAsync(id, dto);
-        if (printer == null)
-            return NotFound();
+        try
+        {
+            var printer = await _printerService.UpdatePrinterAsync(id, dto);
+            if (printer == null)
+                return NotFound();
 
-        return Ok(printer);
+            return Ok(printer);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [HttpDelete("{id}")]
+    [Authorize(Roles = "Administrator")]
     public async Task<ActionResult> Delete(int id)
     {
         var result = await _printerService.DeletePrinterAsync(id);
@@ -60,6 +79,7 @@ public class PrintersController : ControllerBase
     }
 
     [HttpPost("{id}/availability")]
+    [Authorize(Roles = "Administrator")]
     public async Task<ActionResult> SetAvailability(int id, [FromBody] bool isAvailable)
     {
         var result = await _printerService.SetPrinterAvailabilityAsync(id, isAvailable);

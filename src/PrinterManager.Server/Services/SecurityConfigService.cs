@@ -16,30 +16,33 @@ public interface ISecurityConfigService
 public class SecurityConfigService : ISecurityConfigService
 {
     private readonly PrinterManagerDbContext _context;
-    private readonly IConfiguration _configuration;
 
-    public SecurityConfigService(PrinterManagerDbContext context, IConfiguration configuration)
+    public SecurityConfigService(PrinterManagerDbContext context)
     {
         _context = context;
-        _configuration = configuration;
     }
 
     public async Task<LdapConfigDto> GetLdapConfigAsync()
     {
-        var config = await _context.LdapConfigurations.FirstAsync();
-        return new LdapConfigDto
-        {
-            Enabled = config.Enabled,
-            Server = config.Server,
-            Port = config.Port,
-            BaseDn = config.BaseDn,
-            UserDnTemplate = config.UserDnTemplate
-        };
+        return ToDto(await GetOrCreateLdapConfigAsync());
     }
 
     public async Task<LdapConfigDto> UpdateLdapConfigAsync(LdapConfigDto dto)
     {
-        var config = await _context.LdapConfigurations.FirstAsync();
+        if (dto.Port is < 1 or > 65535)
+            throw new ArgumentException("Der LDAP-Port muss zwischen 1 und 65535 liegen.");
+
+        if (dto.Enabled)
+        {
+            if (string.IsNullOrWhiteSpace(dto.Server))
+                throw new ArgumentException("LDAP-Server ist erforderlich.");
+            if (string.IsNullOrWhiteSpace(dto.BaseDn))
+                throw new ArgumentException("Base-DN ist erforderlich.");
+            if (string.IsNullOrWhiteSpace(dto.UserDnTemplate) || !dto.UserDnTemplate.Contains("{0}"))
+                throw new ArgumentException("Die User-DN-Vorlage muss den Platzhalter {0} enthalten.");
+        }
+
+        var config = await GetOrCreateLdapConfigAsync();
         config.Enabled = dto.Enabled;
         config.Server = dto.Server;
         config.Port = dto.Port;
@@ -49,30 +52,20 @@ public class SecurityConfigService : ISecurityConfigService
 
         await _context.SaveChangesAsync();
 
-        return new LdapConfigDto
-        {
-            Enabled = config.Enabled,
-            Server = config.Server,
-            Port = config.Port,
-            BaseDn = config.BaseDn,
-            UserDnTemplate = config.UserDnTemplate
-        };
+        return ToDto(config);
     }
 
     public async Task<SslConfigDto> GetSslConfigAsync()
     {
-        var config = await _context.SslConfigurations.FirstAsync();
-        return new SslConfigDto
-        {
-            Enabled = config.Enabled,
-            HttpsPort = config.HttpsPort,
-            CertificatePath = config.CertificatePath
-        };
+        return ToDto(await GetOrCreateSslConfigAsync());
     }
 
     public async Task<SslConfigDto> UpdateSslConfigAsync(SslConfigDto dto)
     {
-        var config = await _context.SslConfigurations.FirstAsync();
+        if (dto.HttpsPort is < 1 or > 65535)
+            throw new ArgumentException("Der HTTPS-Port muss zwischen 1 und 65535 liegen.");
+
+        var config = await GetOrCreateSslConfigAsync();
         config.Enabled = dto.Enabled;
         config.HttpsPort = dto.HttpsPort;
 
@@ -86,11 +79,47 @@ public class SecurityConfigService : ISecurityConfigService
 
         await _context.SaveChangesAsync();
 
-        return new SslConfigDto
-        {
-            Enabled = config.Enabled,
-            HttpsPort = config.HttpsPort,
-            CertificatePath = config.CertificatePath
-        };
+        return ToDto(config);
     }
+
+    private async Task<LdapConfiguration> GetOrCreateLdapConfigAsync()
+    {
+        var config = await _context.LdapConfigurations.FirstOrDefaultAsync();
+        if (config != null)
+            return config;
+
+        config = new LdapConfiguration { Id = 1 };
+        _context.LdapConfigurations.Add(config);
+        await _context.SaveChangesAsync();
+        return config;
+    }
+
+    private async Task<SslConfiguration> GetOrCreateSslConfigAsync()
+    {
+        var config = await _context.SslConfigurations.FirstOrDefaultAsync();
+        if (config != null)
+            return config;
+
+        config = new SslConfiguration { Id = 1 };
+        _context.SslConfigurations.Add(config);
+        await _context.SaveChangesAsync();
+        return config;
+    }
+
+    private static LdapConfigDto ToDto(LdapConfiguration config) => new()
+    {
+        Enabled = config.Enabled,
+        Server = config.Server,
+        Port = config.Port,
+        BaseDn = config.BaseDn,
+        UserDnTemplate = config.UserDnTemplate
+    };
+
+    // CertificatePassword wird bewusst NICHT zurückgegeben.
+    private static SslConfigDto ToDto(SslConfiguration config) => new()
+    {
+        Enabled = config.Enabled,
+        HttpsPort = config.HttpsPort,
+        CertificatePath = config.CertificatePath
+    };
 }

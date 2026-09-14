@@ -1,6 +1,8 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PrinterManager.Server.Data;
+using PrinterManager.Server.Security;
 using PrinterManager.Server.Services;
 using PrinterManager.Shared.DTOs;
 
@@ -8,6 +10,7 @@ namespace PrinterManager.Server.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class ClientsController : ControllerBase
 {
     private readonly IClientService _clientService;
@@ -19,18 +22,30 @@ public class ClientsController : ControllerBase
         _context = context;
     }
 
+    /// <summary>Wird vom Client-Dienst aufgerufen — kein JWT, dafür der Client-API-Key.</summary>
     [HttpPost("register")]
+    [AllowAnonymous]
+    [ClientApiKey]
     public async Task<ActionResult<PrinterActionsResponse>> Register([FromBody] ClientRegistrationDto dto)
     {
+        if (string.IsNullOrWhiteSpace(dto.Hostname) || string.IsNullOrWhiteSpace(dto.UserPrincipalName))
+            return BadRequest(new { message = "Hostname und UserPrincipalName sind erforderlich." });
+
         var response = await _clientService.RegisterClientAsync(dto);
         return Ok(response);
     }
 
+    /// <summary>Wird vom Client-Dienst aufgerufen — kein JWT, dafür der Client-API-Key.</summary>
     [HttpGet("actions")]
+    [AllowAnonymous]
+    [ClientApiKey]
     public async Task<ActionResult<PrinterActionsResponse>> GetActions(
         [FromQuery] string hostname,
         [FromQuery] string userPrincipalName)
     {
+        if (string.IsNullOrWhiteSpace(hostname) || string.IsNullOrWhiteSpace(userPrincipalName))
+            return BadRequest(new { message = "hostname und userPrincipalName sind erforderlich." });
+
         var response = await _clientService.GetPrinterActionsAsync(hostname, userPrincipalName);
         return Ok(response);
     }
@@ -71,6 +86,7 @@ public class ClientsController : ControllerBase
     }
 
     [HttpDelete("{id}")]
+    [Authorize(Roles = "Administrator")]
     public async Task<ActionResult> DeleteClient(int id)
     {
         var client = await _context.Clients.FindAsync(id);
@@ -83,6 +99,7 @@ public class ClientsController : ControllerBase
     }
 
     [HttpDelete("users/{id}")]
+    [Authorize(Roles = "Administrator")]
     public async Task<ActionResult> DeleteUser(int id)
     {
         var user = await _context.Users.FindAsync(id);
@@ -97,22 +114,22 @@ public class ClientsController : ControllerBase
     [HttpGet("{id}/printers")]
     public async Task<ActionResult> GetClientPrinters(int id)
     {
-        var client = await _context.Clients
-            .Include(c => c.InstalledPrinters)
-            .FirstOrDefaultAsync(c => c.Id == id);
-
-        if (client == null)
+        var clientExists = await _context.Clients.AnyAsync(c => c.Id == id);
+        if (!clientExists)
             return NotFound();
 
-        var printers = client.InstalledPrinters.Select(p => new
-        {
-            p.Id,
-            p.PrinterName,
-            p.PrinterPath,
-            p.IsDefault,
-            p.ManagedPrinterId,
-            p.DetectedAt
-        }).ToList();
+        var printers = await _context.ClientPrinters
+            .Where(p => p.ClientId == id)
+            .Select(p => new
+            {
+                p.Id,
+                p.PrinterName,
+                p.PrinterPath,
+                p.IsDefault,
+                p.ManagedPrinterId,
+                p.DetectedAt
+            })
+            .ToListAsync();
 
         return Ok(printers);
     }

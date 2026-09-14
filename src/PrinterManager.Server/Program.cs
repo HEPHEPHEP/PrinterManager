@@ -1,8 +1,10 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using PrinterManager.Server.Data;
+using PrinterManager.Server.Security;
 using PrinterManager.Server.Services;
 using System.Text;
 
@@ -67,7 +69,14 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 
-builder.Services.AddAuthorization();
+// Standardmäßig ist JEDER Endpunkt geschützt. Endpunkte, die bewusst offen sein
+// sollen (Login, Client-Registrierung), müssen [AllowAnonymous] tragen.
+builder.Services.AddAuthorization(options =>
+{
+    options.FallbackPolicy = new AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .Build();
+});
 
 // Add services
 builder.Services.AddScoped<IPrinterService, PrinterService>();
@@ -145,8 +154,18 @@ using (var scope = app.Services.CreateScope())
         });
         db.SaveChanges();
         
-        Console.WriteLine("✓ Admin-Benutzer erstellt: admin (Passwort aus ADMIN_PASSWORD)");
+        app.Logger.LogInformation("Admin-Benutzer erstellt: admin (Passwort aus ADMIN_PASSWORD)");
     }
+}
+
+// Warnen, wenn die Client-Endpunkte ungeschützt sind.
+if (string.IsNullOrEmpty(app.Configuration[ClientApiKeyFilter.ConfigurationKey]))
+{
+    app.Logger.LogWarning(
+        "{ConfigKey} ist nicht gesetzt: /api/clients/register und /api/clients/actions sind " +
+        "ohne Authentifizierung erreichbar. Setze einen Schlüssel und trage ihn bei den Clients " +
+        "unter \"ClientApiKey\" ein.",
+        ClientApiKeyFilter.ConfigurationKey);
 }
 
 // Configure the HTTP request pipeline.

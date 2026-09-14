@@ -3,16 +3,22 @@
 @inject IApiService ApiService
 @inject AuthStateService AuthState
 @inject NavigationManager Navigation
+@inject ILogger<Home> Logger
 
 <PageTitle>Übersicht</PageTitle>
 
 @if (!AuthState.IsAuthenticated)
 {
-    Navigation.NavigateTo("/login");
+    <RedirectToLogin />
 }
 else
 {
     <h1>Windows Printer Manager</h1>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger">@errorMessage</div>
+    }
 
 <div class="row mt-4">
     <div class="col-md-3">
@@ -74,9 +80,14 @@ else
     private int clientCount = 0;
     private int userCount = 0;
     private int assignmentCount = 0;
+    private string errorMessage = "";
 
     protected override async Task OnInitializedAsync()
     {
+        // Ohne Anmeldung keine API-Aufrufe — der Server antwortet sonst mit 401.
+        if (!AuthState.IsAuthenticated)
+            return;
+
         try
         {
             var printers = await ApiService.GetPrintersAsync();
@@ -93,7 +104,8 @@ else
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error loading data: {ex.Message}");
+            Logger.LogError(ex, "Übersichtsdaten konnten nicht geladen werden");
+            errorMessage = "Die Daten konnten nicht geladen werden. Bitte Serververbindung prüfen.";
         }
     }
 }

@@ -4,6 +4,10 @@
   "Jwt": {
     "Key": "HIER_EINEN_SICHEREN_SCHLÜSSEL_EINTRAGEN_MINDESTENS_32_ZEICHEN"
   },
+  "ClientApi": {
+    "_HINWEIS": "Gemeinsamer Schlüssel für die Client-Endpunkte. Derselbe Wert muss bei den Clients unter \"ClientApiKey\" stehen.",
+    "Key": "HIER_EINEN_ZUFAELLIGEN_CLIENT_SCHLUESSEL_EINTRAGEN"
+  },
   "Cors": {
     "AllowedOrigins": [
       "https://printermanager.meinefirma.de"

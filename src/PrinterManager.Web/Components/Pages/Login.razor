@@ -3,6 +3,7 @@
 @inject IApiService ApiService
 @inject AuthStateService AuthState
 @inject NavigationManager Navigation
+@inject ILogger<Login> Logger
 
 <PageTitle>Login</PageTitle>
 
@@ -38,9 +39,6 @@
                     </button>
                 </EditForm>
 
-                <div class="mt-3 text-center text-muted">
-                    <small>Standard-Login: admin / admin</small>
-                </div>
             </div>
         </div>
     </div>
@@ -58,9 +56,7 @@
 
         try
         {
-            Console.WriteLine($"Attempting login with username: {loginDto.Username}");
             var result = await ApiService.LoginAsync(loginDto);
-            Console.WriteLine($"Login result: Success={result.Success}, Message={result.Message}");
 
             if (result.Success && result.Token != null)
             {
@@ -69,13 +65,15 @@
             }
             else
             {
+                // Passwort bewusst nirgends protokollieren.
+                Logger.LogInformation("Anmeldung für {Username} fehlgeschlagen", loginDto.Username);
                 errorMessage = result.Message ?? "Login fehlgeschlagen";
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Login exception: {ex}");
-            errorMessage = $"Fehler: {ex.Message}";
+            Logger.LogError(ex, "Fehler bei der Anmeldung");
+            errorMessage = "Anmeldung nicht möglich. Bitte Serververbindung prüfen.";
         }
         finally
         {

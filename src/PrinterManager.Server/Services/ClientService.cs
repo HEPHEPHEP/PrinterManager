@@ -13,6 +13,9 @@ public interface IClientService
 
 public class ClientService : IClientService
 {
+    /// <summary>Obergrenze für die Ersatzdrucker-Kette (Schutz vor Zyklen in Altdaten).</summary>
+    private const int MaxReplacementDepth = 10;
+
     private readonly PrinterManagerDbContext _context;
     private readonly ILogger<ClientService> _logger;
 
@@ -24,12 +27,10 @@ public class ClientService : IClientService
 
     public async Task<PrinterActionsResponse> RegisterClientAsync(ClientRegistrationDto dto)
     {
-        _logger.LogInformation($"Client registering: {dto.Hostname}, User: {dto.UserPrincipalName}, Printers: {dto.InstalledPrinters.Count}");
+        _logger.LogDebug("Client meldet sich an: {Hostname}, Benutzer: {User}, Drucker: {Count}",
+            dto.Hostname, dto.UserPrincipalName, dto.InstalledPrinters.Count);
 
-        // Find or create client
-        var client = await _context.Clients
-            .Include(c => c.InstalledPrinters)
-            .FirstOrDefaultAsync(c => c.Hostname == dto.Hostname);
+        var client = await _context.Clients.FirstOrDefaultAsync(c => c.Hostname == dto.Hostname);
 
         if (client == null)
         {
@@ -50,7 +51,6 @@ public class ClientService : IClientService
             client.IsActive = true;
         }
 
-        // Find or create user
         var user = await _context.Users.FirstOrDefaultAsync(u => u.UserPrincipalName == dto.UserPrincipalName);
         if (user == null)
         {
@@ -69,40 +69,77 @@ public class ClientService : IClientService
 
         await _context.SaveChangesAsync();
 
-        // Update installed printers list
-        // Remove old entries
-        var oldPrinters = await _context.ClientPrinters
-            .Where(cp => cp.ClientId == client.Id)
-            .ToListAsync();
-        _context.ClientPrinters.RemoveRange(oldPrinters);
+        await SyncInstalledPrintersAsync(client.Id, dto.InstalledPrinters);
 
-        // Add current printers from client
-        foreach (var installedPrinter in dto.InstalledPrinters)
-        {
-            // Try to match with managed printer by SharePath
-            var managedPrinter = await _context.Printers
-                .FirstOrDefaultAsync(p => p.SharePath == installedPrinter.PrinterPath);
-
-            var clientPrinter = new ClientPrinter
-            {
-                ClientId = client.Id,
-                PrinterName = installedPrinter.PrinterName,
-                PrinterPath = installedPrinter.PrinterPath,
-                IsDefault = installedPrinter.IsDefault,
-                ManagedPrinterId = managedPrinter?.Id
-            };
-            _context.ClientPrinters.Add(clientPrinter);
-        }
-        await _context.SaveChangesAsync();
-
-        // Return printer actions
         return await GetPrinterActionsAsync(dto.Hostname, dto.UserPrincipalName);
+    }
+
+    /// <summary>
+    /// Gleicht die gemeldete Druckerliste mit der gespeicherten ab. Bestehende Einträge
+    /// werden aktualisiert statt gelöscht und neu angelegt — sonst wächst die ID-Sequenz
+    /// bei jedem Poll und <c>DetectedAt</c> verliert seine Aussage.
+    /// </summary>
+    private async Task SyncInstalledPrintersAsync(int clientId, List<InstalledPrinterDto> reported)
+    {
+        var stored = await _context.ClientPrinters
+            .Where(cp => cp.ClientId == clientId)
+            .ToListAsync();
+
+        var managedByPath = await _context.Printers
+            .Select(p => new { p.Id, p.SharePath })
+            .ToListAsync();
+
+        var pathLookup = managedByPath
+            .GroupBy(p => p.SharePath, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var printer in reported)
+        {
+            if (string.IsNullOrWhiteSpace(printer.PrinterName) || !seen.Add(printer.PrinterName))
+                continue;
+
+            int? managedPrinterId = null;
+            if (!string.IsNullOrEmpty(printer.PrinterPath) &&
+                pathLookup.TryGetValue(printer.PrinterPath, out var matchedId))
+            {
+                managedPrinterId = matchedId;
+            }
+
+            var existing = stored.FirstOrDefault(
+                cp => string.Equals(cp.PrinterName, printer.PrinterName, StringComparison.OrdinalIgnoreCase));
+
+            if (existing != null)
+            {
+                existing.PrinterPath = printer.PrinterPath;
+                existing.IsDefault = printer.IsDefault;
+                existing.ManagedPrinterId = managedPrinterId;
+            }
+            else
+            {
+                _context.ClientPrinters.Add(new ClientPrinter
+                {
+                    ClientId = clientId,
+                    PrinterName = printer.PrinterName,
+                    PrinterPath = printer.PrinterPath,
+                    IsDefault = printer.IsDefault,
+                    ManagedPrinterId = managedPrinterId
+                });
+            }
+        }
+
+        var removed = stored.Where(cp => !seen.Contains(cp.PrinterName)).ToList();
+        if (removed.Count > 0)
+        {
+            _context.ClientPrinters.RemoveRange(removed);
+        }
+
+        await _context.SaveChangesAsync();
     }
 
     public async Task<PrinterActionsResponse> GetPrinterActionsAsync(string hostname, string userPrincipalName)
     {
-        _logger.LogInformation($"Getting printer actions for {hostname}, User: {userPrincipalName}");
-
         var client = await _context.Clients
             .Include(c => c.InstalledPrinters)
             .FirstOrDefaultAsync(c => c.Hostname == hostname);
@@ -112,106 +149,158 @@ public class ClientService : IClientService
 
         if (client == null || user == null)
         {
-            _logger.LogWarning($"Client or user not found: Client={client != null}, User={user != null}");
+            _logger.LogWarning("Client oder Benutzer unbekannt: Hostname={Hostname} gefunden={ClientFound}, " +
+                "Benutzer={User} gefunden={UserFound}",
+                hostname, client != null, userPrincipalName, user != null);
             return new PrinterActionsResponse();
         }
 
-        _logger.LogInformation($"Client has {client.InstalledPrinters.Count} installed printers");
+        var config = await GetOrCreateConfigAsync();
 
-        var config = await _context.SystemConfigurations.FirstAsync();
-
-        // Get user and client assignments
         var userAssignments = await _context.PrinterAssignments
             .Include(a => a.Printer)
-            .Where(a => a.UserId == user.Id && a.Printer!.IsAvailable)
+            .Where(a => a.UserId == user.Id)
             .ToListAsync();
 
         var clientAssignments = await _context.PrinterAssignments
             .Include(a => a.Printer)
-            .Where(a => a.ClientId == client.Id && a.Printer!.IsAvailable)
+            .Where(a => a.ClientId == client.Id)
             .ToListAsync();
 
-        _logger.LogInformation($"Found {userAssignments.Count} user assignments, {clientAssignments.Count} client assignments");
+        var activeAssignments = config.AssignmentPriority == AssignmentPriority.UserPriority
+            ? (userAssignments.Count > 0 ? userAssignments : clientAssignments)
+            : (clientAssignments.Count > 0 ? clientAssignments : userAssignments);
 
-        // Determine which assignments to use based on priority
-        List<PrinterAssignment> activeAssignments;
-        if (config.AssignmentPriority == AssignmentPriority.UserPriority)
+        _logger.LogDebug(
+            "{Hostname}/{User}: {UserCount} Benutzer-, {ClientCount} Client-Zuweisungen, " +
+            "aktiv: {ActiveCount} (Priorität: {Priority})",
+            hostname, userPrincipalName, userAssignments.Count, clientAssignments.Count,
+            activeAssignments.Count, config.AssignmentPriority);
+
+        Dictionary<int, Printer>? allPrinters = null;
+        if (config.AutoAssignReplacementPrinters && activeAssignments.Any(a => a.Printer is { IsAvailable: false }))
         {
-            activeAssignments = userAssignments.Any() ? userAssignments : clientAssignments;
-        }
-        else
-        {
-            activeAssignments = clientAssignments.Any() ? clientAssignments : userAssignments;
+            allPrinters = await _context.Printers.ToDictionaryAsync(p => p.Id);
         }
 
-        _logger.LogInformation($"Using {activeAssignments.Count} active assignments (Priority: {config.AssignmentPriority})");
+        // Zuweisungen auf tatsächlich verfügbare Drucker auflösen (ggf. über Ersatzdrucker).
+        var targetPrinters = new Dictionary<int, Printer>();
+        Printer? defaultPrinter = null;
 
-        var actions = new List<PrinterActionDto>();
-        var installedPrinterPaths = client.InstalledPrinters.Select(p => p.PrinterPath).ToHashSet();
-
-        _logger.LogInformation($"Installed printer paths: {string.Join(", ", installedPrinterPaths)}");
-
-        // Install assigned printers
         foreach (var assignment in activeAssignments)
         {
-            _logger.LogInformation($"Checking assignment: {assignment.Printer!.Name} ({assignment.Printer.SharePath})");
+            if (assignment.Printer == null)
+                continue;
 
-            if (!installedPrinterPaths.Contains(assignment.Printer!.SharePath))
+            var resolved = ResolveAvailablePrinter(assignment.Printer, allPrinters);
+            if (resolved == null)
             {
-                _logger.LogInformation($"  -> NOT INSTALLED - Adding Install action");
-                actions.Add(new PrinterActionDto
-                {
-                    PrinterId = assignment.PrinterId,
-                    Action = PrinterAction.Install,
-                    SharePath = assignment.Printer.SharePath,
-                    PrinterName = assignment.Printer.Name
-                });
-            }
-            else
-            {
-                _logger.LogInformation($"  -> Already installed");
+                _logger.LogInformation(
+                    "Drucker {Printer} ist nicht verfügbar und hat keinen verfügbaren Ersatz — übersprungen",
+                    assignment.Printer.Name);
+                continue;
             }
 
-            // Set default printer
+            targetPrinters[resolved.Id] = resolved;
+
             if (assignment.IsDefaultPrinter)
             {
-                actions.Add(new PrinterActionDto
-                {
-                    PrinterId = assignment.PrinterId,
-                    Action = PrinterAction.SetDefault,
-                    SharePath = assignment.Printer.SharePath,
-                    PrinterName = assignment.Printer.Name
-                });
+                defaultPrinter = resolved;
             }
         }
 
-        // Remove printers that are no longer assigned
-        var assignedPrinterIds = activeAssignments.Select(a => a.PrinterId).ToHashSet();
-        var managedPrinters = await _context.Printers
-            .Where(p => assignedPrinterIds.Contains(p.Id))
-            .ToListAsync();
+        // UNC-Pfade sind unter Windows nicht case-sensitiv.
+        var installedPaths = client.InstalledPrinters
+            .Where(p => !string.IsNullOrEmpty(p.PrinterPath))
+            .Select(p => p.PrinterPath!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        var assignedPaths = managedPrinters.Select(p => p.SharePath).ToHashSet();
+        var actions = new List<PrinterActionDto>();
+
+        foreach (var printer in targetPrinters.Values)
+        {
+            if (!installedPaths.Contains(printer.SharePath))
+            {
+                actions.Add(new PrinterActionDto
+                {
+                    PrinterId = printer.Id,
+                    Action = PrinterAction.Install,
+                    SharePath = printer.SharePath,
+                    PrinterName = printer.Name
+                });
+            }
+        }
 
         foreach (var installedPrinter in client.InstalledPrinters)
         {
             if (installedPrinter.ManagedPrinterId.HasValue &&
-                !assignedPrinterIds.Contains(installedPrinter.ManagedPrinterId.Value))
+                !targetPrinters.ContainsKey(installedPrinter.ManagedPrinterId.Value))
             {
                 actions.Add(new PrinterActionDto
                 {
                     PrinterId = installedPrinter.ManagedPrinterId.Value,
                     Action = PrinterAction.Remove,
+                    SharePath = installedPrinter.PrinterPath,
                     PrinterName = installedPrinter.PrinterName
                 });
             }
         }
 
-        _logger.LogInformation($"Returning {actions.Count} actions to client");
-
-        return new PrinterActionsResponse
+        // Standarddrucker zuletzt, damit er nach Installation/Entfernung gesetzt wird.
+        if (defaultPrinter != null)
         {
-            Actions = actions
-        };
+            actions.Add(new PrinterActionDto
+            {
+                PrinterId = defaultPrinter.Id,
+                Action = PrinterAction.SetDefault,
+                SharePath = defaultPrinter.SharePath,
+                PrinterName = defaultPrinter.Name
+            });
+        }
+
+        _logger.LogDebug("{Hostname}/{User}: {Count} Aktionen", hostname, userPrincipalName, actions.Count);
+
+        return new PrinterActionsResponse { Actions = actions };
+    }
+
+    /// <summary>
+    /// Liefert den Drucker selbst, wenn er verfügbar ist, sonst den ersten verfügbaren
+    /// Ersatzdrucker in der Kette — oder <c>null</c>, wenn es keinen gibt.
+    /// </summary>
+    private static Printer? ResolveAvailablePrinter(Printer printer, Dictionary<int, Printer>? allPrinters)
+    {
+        if (printer.IsAvailable)
+            return printer;
+
+        if (allPrinters == null)
+            return null;
+
+        var visited = new HashSet<int> { printer.Id };
+        var currentId = printer.ReplacementPrinterId;
+
+        for (var depth = 0; depth < MaxReplacementDepth && currentId.HasValue; depth++)
+        {
+            if (!visited.Add(currentId.Value) || !allPrinters.TryGetValue(currentId.Value, out var candidate))
+                return null;
+
+            if (candidate.IsAvailable)
+                return candidate;
+
+            currentId = candidate.ReplacementPrinterId;
+        }
+
+        return null;
+    }
+
+    private async Task<SystemConfiguration> GetOrCreateConfigAsync()
+    {
+        var config = await _context.SystemConfigurations.FirstOrDefaultAsync();
+        if (config != null)
+            return config;
+
+        config = new SystemConfiguration { Id = 1 };
+        _context.SystemConfigurations.Add(config);
+        await _context.SaveChangesAsync();
+        return config;
     }
 }

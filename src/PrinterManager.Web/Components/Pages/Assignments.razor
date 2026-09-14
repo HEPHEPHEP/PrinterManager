@@ -9,11 +9,16 @@
 
 @if (!AuthState.IsAuthenticated)
 {
-    Navigation.NavigateTo("/login");
+    <RedirectToLogin />
 }
 else
 {
 <h1>Druckerzuweisungen verwalten</h1>
+
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
 
 <div class="mb-3">
     <button class="btn btn-primary" @onclick="ShowAddForm">Neue Zuweisung</button>
@@ -236,6 +241,7 @@ else
     private BulkAssignmentDto bulkAssignment = new() { AssignmentType = "User" };
     private string searchText = "";
     private string filterType = "";
+    private string errorMessage = "";
 
     private IEnumerable<AssignmentDto> FilteredAssignments
     {
@@ -268,6 +274,10 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        // Ohne Anmeldung keine API-Aufrufe — der Server antwortet sonst mit 401.
+        if (!AuthState.IsAuthenticated)
+            return;
+
         await LoadData();
 
         // Check for query parameters
@@ -346,21 +356,38 @@ else
 
     private async Task AddAssignment()
     {
-        if (isBulkMode)
+        errorMessage = "";
+        try
         {
-            await ApiService.CreateBulkAssignmentsAsync(bulkAssignment);
+            if (isBulkMode)
+            {
+                await ApiService.CreateBulkAssignmentsAsync(bulkAssignment);
+            }
+            else
+            {
+                await ApiService.CreateAssignmentAsync(newAssignment);
+            }
+
+            showAddAssignmentForm = false;
+            await LoadData();
         }
-        else
+        catch (Exception ex)
         {
-            await ApiService.CreateAssignmentAsync(newAssignment);
+            errorMessage = $"Zuweisung konnte nicht angelegt werden: {ex.Message}";
         }
-        showAddAssignmentForm = false;
-        await LoadData();
     }
 
     private async Task DeleteAssignment(int id)
     {
-        await ApiService.DeleteAssignmentAsync(id);
-        await LoadData();
+        errorMessage = "";
+        try
+        {
+            await ApiService.DeleteAssignmentAsync(id);
+            await LoadData();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Zuweisung konnte nicht gelöscht werden: {ex.Message}";
+        }
     }
 }

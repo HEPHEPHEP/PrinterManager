@@ -18,68 +18,40 @@ public interface IPrinterService
 public class PrinterService : IPrinterService
 {
     private readonly PrinterManagerDbContext _context;
-    private readonly IAssignmentService _assignmentService;
 
-    public PrinterService(PrinterManagerDbContext context, IAssignmentService assignmentService)
+    public PrinterService(PrinterManagerDbContext context)
     {
         _context = context;
-        _assignmentService = assignmentService;
     }
 
     public async Task<List<PrinterDto>> GetAllPrintersAsync()
     {
-        return await _context.Printers
-            .Include(p => p.ReplacementPrinter)
-            .Select(p => new PrinterDto
-            {
-                Id = p.Id,
-                PrinterId = p.PrinterId,
-                Name = p.Name,
-                ServiceNumber = p.ServiceNumber,
-                SharePath = p.SharePath,
-                Description = p.Description,
-                Location = p.Location,
-                ServerName = p.ServerName,
-                IsAvailable = p.IsAvailable,
-                ReplacementPrinterId = p.ReplacementPrinterId,
-                ReplacementPrinterName = p.ReplacementPrinter != null ? p.ReplacementPrinter.Name : null
-            })
-            .ToListAsync();
+        return await Project(_context.Printers).ToListAsync();
     }
 
     public async Task<PrinterDto?> GetPrinterByIdAsync(int id)
     {
-        var printer = await _context.Printers
-            .Include(p => p.ReplacementPrinter)
-            .FirstOrDefaultAsync(p => p.Id == id);
-
-        if (printer == null)
-            return null;
-
-        return new PrinterDto
-        {
-            Id = printer.Id,
-            PrinterId = printer.PrinterId,
-            Name = printer.Name,
-            ServiceNumber = printer.ServiceNumber,
-            SharePath = printer.SharePath,
-            Description = printer.Description,
-            Location = printer.Location,
-            ServerName = printer.ServerName,
-            IsAvailable = printer.IsAvailable,
-            ReplacementPrinterId = printer.ReplacementPrinterId,
-            ReplacementPrinterName = printer.ReplacementPrinter?.Name
-        };
+        return await Project(_context.Printers.Where(p => p.Id == id)).FirstOrDefaultAsync();
     }
 
     public async Task<PrinterDto> CreatePrinterAsync(CreatePrinterDto dto)
     {
+        if (string.IsNullOrWhiteSpace(dto.PrinterId))
+            throw new ArgumentException("Drucker-ID ist erforderlich.");
+        if (string.IsNullOrWhiteSpace(dto.Name))
+            throw new ArgumentException("Name ist erforderlich.");
+        if (string.IsNullOrWhiteSpace(dto.SharePath))
+            throw new ArgumentException("Freigabepfad ist erforderlich.");
+
+        if (await _context.Printers.AnyAsync(p => p.PrinterId == dto.PrinterId))
+            throw new ArgumentException($"Drucker-ID '{dto.PrinterId}' ist bereits vergeben.");
+
         var printer = new Printer
         {
-            PrinterId = dto.PrinterId,
-            Name = dto.Name,
+            PrinterId = dto.PrinterId.Trim(),
+            Name = dto.Name.Trim(),
             ServiceNumber = dto.ServiceNumber,
-            SharePath = dto.SharePath,
+            SharePath = dto.SharePath.Trim(),
             Description = dto.Description,
             Location = dto.Location,
             ServerName = dto.ServerName,
@@ -89,46 +61,38 @@ public class PrinterService : IPrinterService
         _context.Printers.Add(printer);
         await _context.SaveChangesAsync();
 
-        return new PrinterDto
-        {
-            Id = printer.Id,
-            PrinterId = printer.PrinterId,
-            Name = printer.Name,
-            ServiceNumber = printer.ServiceNumber,
-            SharePath = printer.SharePath,
-            Description = printer.Description,
-            Location = printer.Location,
-            ServerName = printer.ServerName,
-            IsAvailable = printer.IsAvailable
-        };
+        return (await GetPrinterByIdAsync(printer.Id))!;
     }
 
     public async Task<PrinterDto?> UpdatePrinterAsync(int id, UpdatePrinterDto dto)
     {
-        var printer = await _context.Printers
-            .Include(p => p.ReplacementPrinter)
-            .FirstOrDefaultAsync(p => p.Id == id);
+        var printer = await _context.Printers.FirstOrDefaultAsync(p => p.Id == id);
 
         if (printer == null)
             return null;
 
         if (dto.Name != null)
-            printer.Name = dto.Name;
+        {
+            if (string.IsNullOrWhiteSpace(dto.Name))
+                throw new ArgumentException("Name darf nicht leer sein.");
+            printer.Name = dto.Name.Trim();
+        }
         if (dto.ServiceNumber != null)
             printer.ServiceNumber = dto.ServiceNumber;
         if (dto.Description != null)
             printer.Description = dto.Description;
         if (dto.Location != null)
             printer.Location = dto.Location;
-        if (dto.ReplacementPrinterId.HasValue)
-            printer.ReplacementPrinterId = dto.ReplacementPrinterId.Value == 0 ? null : dto.ReplacementPrinterId.Value;
 
-        // Handle availability change
-        if (dto.IsAvailable.HasValue && dto.IsAvailable.Value != printer.IsAvailable)
+        if (dto.ReplacementPrinterId.HasValue)
         {
-            await SetPrinterAvailabilityAsync(id, dto.IsAvailable.Value);
-            return await GetPrinterByIdAsync(id);
+            var replacementId = dto.ReplacementPrinterId.Value == 0 ? (int?)null : dto.ReplacementPrinterId.Value;
+            await ValidateReplacementAsync(printer.Id, replacementId);
+            printer.ReplacementPrinterId = replacementId;
         }
+
+        if (dto.IsAvailable.HasValue)
+            printer.IsAvailable = dto.IsAvailable.Value;
 
         printer.LastModified = DateTime.UtcNow;
         await _context.SaveChangesAsync();
@@ -142,6 +106,17 @@ public class PrinterService : IPrinterService
         if (printer == null)
             return false;
 
+        // ClientPrinters kennen keine Fremdschlüssel-Beziehung zu Printers — die
+        // Verweise müssen von Hand gelöst werden, sonst zeigen sie ins Leere.
+        var staleReferences = await _context.ClientPrinters
+            .Where(cp => cp.ManagedPrinterId == id)
+            .ToListAsync();
+
+        foreach (var reference in staleReferences)
+        {
+            reference.ManagedPrinterId = null;
+        }
+
         _context.Printers.Remove(printer);
         await _context.SaveChangesAsync();
         return true;
@@ -149,9 +124,7 @@ public class PrinterService : IPrinterService
 
     public async Task<bool> SetPrinterAvailabilityAsync(int id, bool isAvailable)
     {
-        var printer = await _context.Printers
-            .Include(p => p.ReplacementPrinter)
-            .FirstOrDefaultAsync(p => p.Id == id);
+        var printer = await _context.Printers.FirstOrDefaultAsync(p => p.Id == id);
 
         if (printer == null)
             return false;
@@ -159,18 +132,59 @@ public class PrinterService : IPrinterService
         printer.IsAvailable = isAvailable;
         printer.LastModified = DateTime.UtcNow;
 
-        // If marking as unavailable and replacement printer exists, trigger replacement
-        if (!isAvailable && printer.ReplacementPrinterId.HasValue)
-        {
-            await _assignmentService.ApplyReplacementPrinterAsync(id, printer.ReplacementPrinterId.Value);
-        }
-        // If marking as available again, restore original assignments
-        else if (isAvailable && printer.ReplacementPrinterId.HasValue)
-        {
-            await _assignmentService.RestoreOriginalPrinterAsync(id);
-        }
-
+        // Ersatzdrucker werden nicht mehr als zusätzliche Zuweisungen in die Datenbank
+        // geschrieben, sondern beim Abruf der Client-Aktionen aufgelöst
+        // (siehe ClientService.GetPrinterActionsAsync). Dadurch bleiben die echten
+        // Zuweisungen unangetastet.
         await _context.SaveChangesAsync();
         return true;
+    }
+
+    /// <summary>
+    /// Verhindert Selbstreferenzen und Zyklen in der Ersatzdrucker-Kette.
+    /// </summary>
+    private async Task ValidateReplacementAsync(int printerId, int? replacementId)
+    {
+        if (replacementId is null)
+            return;
+
+        if (replacementId == printerId)
+            throw new ArgumentException("Ein Drucker kann nicht sein eigener Ersatzdrucker sein.");
+
+        var chain = await _context.Printers
+            .Select(p => new { p.Id, p.ReplacementPrinterId })
+            .ToDictionaryAsync(p => p.Id, p => p.ReplacementPrinterId);
+
+        if (!chain.ContainsKey(replacementId.Value))
+            throw new ArgumentException($"Ersatzdrucker {replacementId} existiert nicht.");
+
+        var current = replacementId;
+        var visited = new HashSet<int> { printerId };
+
+        while (current.HasValue)
+        {
+            if (!visited.Add(current.Value))
+                throw new ArgumentException("Die Ersatzdrucker-Kette darf keinen Zyklus bilden.");
+
+            current = chain.TryGetValue(current.Value, out var next) ? next : null;
+        }
+    }
+
+    private static IQueryable<PrinterDto> Project(IQueryable<Printer> query)
+    {
+        return query.Select(p => new PrinterDto
+        {
+            Id = p.Id,
+            PrinterId = p.PrinterId,
+            Name = p.Name,
+            ServiceNumber = p.ServiceNumber,
+            SharePath = p.SharePath,
+            Description = p.Description,
+            Location = p.Location,
+            ServerName = p.ServerName,
+            IsAvailable = p.IsAvailable,
+            ReplacementPrinterId = p.ReplacementPrinterId,
+            ReplacementPrinterName = p.ReplacementPrinter != null ? p.ReplacementPrinter.Name : null
+        });
     }
 }
