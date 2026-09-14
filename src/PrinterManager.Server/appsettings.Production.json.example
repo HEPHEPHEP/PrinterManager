@@ -1,22 +1,19 @@
 {
-  "_HINWEIS": "Kopiere diese Datei nach appsettings.Production.json und fülle die Werte aus.",
+  "_HINWEIS": "Kopiere diese Datei nach appsettings.Production.json. Alles hier ist optional — fehlende Geheimnisse erzeugt der Server beim ersten Start selbst und legt sie in appsettings.Local.json ab.",
 
-  "Jwt": {
-    "Key": "HIER_EINEN_SICHEREN_SCHLÜSSEL_EINTRAGEN_MINDESTENS_32_ZEICHEN"
-  },
-  "ClientApi": {
-    "_HINWEIS": "Gemeinsamer Schlüssel für die Client-Endpunkte. Derselbe Wert muss bei den Clients unter \"ClientApiKey\" stehen.",
-    "Key": "HIER_EINEN_ZUFAELLIGEN_CLIENT_SCHLUESSEL_EINTRAGEN"
-  },
   "Cors": {
     "AllowedOrigins": [
       "https://printermanager.meinefirma.de"
     ]
   },
+  "ClientApi": {
+    "_HINWEIS": "Sobald der erzeugte Schlüssel bei allen Clients unter \"ClientApiKey\" hinterlegt ist, hier auf true setzen.",
+    "RequireKey": true
+  },
   "Ldap": {
     "Enabled": false,
     "Server": "",
-    "Port": 389,
+    "Port": 636,
     "BaseDn": "",
     "UserDnTemplate": ""
   }

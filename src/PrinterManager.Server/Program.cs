@@ -6,9 +6,19 @@ using Microsoft.OpenApi.Models;
 using PrinterManager.Server.Data;
 using PrinterManager.Server.Security;
 using PrinterManager.Server.Services;
+using PrinterManager.Server.Setup;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Pflichtgeheimnisse auflösen: konfigurierte Werte haben Vorrang, fehlende werden aus
+// appsettings.Local.json ergänzt oder beim ersten Start erzeugt. Dadurch läuft eine
+// frische Installation ohne vorbereitete Umgebungsvariablen.
+var secrets = LocalSecrets.Ensure(builder.Configuration, builder.Environment.ContentRootPath);
+if (secrets.Values.Count > 0)
+{
+    builder.Configuration.AddInMemoryCollection(secrets.Values);
+}
 
 // Add services to the container.
 builder.Services.AddControllers();
@@ -46,14 +56,9 @@ builder.Services.AddSwaggerGen(c =>
 builder.Services.AddDbContext<PrinterManagerDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-// Add Authentication
-var jwtKey = builder.Configuration["Jwt:Key"];
-if (string.IsNullOrEmpty(jwtKey) || jwtKey.Length < 32)
-{
-    throw new InvalidOperationException(
-        "FEHLER: Jwt:Key ist nicht konfiguriert oder zu kurz (min. 32 Zeichen). " +
-        "Setze den Wert in appsettings.json, appsettings.Production.json oder als Umgebungsvariable Jwt__Key.");
-}
+// Add Authentication — der Schlüssel ist an dieser Stelle garantiert vorhanden,
+// weil LocalSecrets ihn sonst erzeugt hat.
+var jwtKey = builder.Configuration["Jwt:Key"]!;
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -116,57 +121,22 @@ builder.Services.AddCors(options =>
     });
 });
 
-// Configure HTTP only by default (HTTPS can be enabled in UI)
-builder.WebHost.ConfigureKestrel(options =>
+// Standard-Port, solange nichts anderes konfiguriert ist. Eine feste Listen-Adresse
+// würde "Urls", --urls und ASPNETCORE_URLS wirkungslos machen.
+var urlsConfigured = !string.IsNullOrEmpty(builder.Configuration["Urls"])
+    || builder.Configuration.GetSection("Kestrel:Endpoints").GetChildren().Any();
+
+if (!urlsConfigured)
 {
-    options.ListenAnyIP(5000); // HTTP
-});
+    builder.WebHost.ConfigureKestrel(options => options.ListenAnyIP(5000));
+}
 
 var app = builder.Build();
 
-// Ensure database is created
-using (var scope = app.Services.CreateScope())
-{
-    var db = scope.ServiceProvider.GetRequiredService<PrinterManagerDbContext>();
-    db.Database.EnsureCreated();
-    
-    // Admin-Benutzer beim ersten Start erstellen (mit BCrypt-Hash)
-    if (!db.ApplicationUsers.Any(u => u.Role == PrinterManager.Shared.Models.UserRole.Administrator))
-    {
-        var adminPassword = builder.Configuration["AdminPassword"]
-            ?? Environment.GetEnvironmentVariable("ADMIN_PASSWORD");
-        
-        if (string.IsNullOrEmpty(adminPassword) || adminPassword.Length < 8)
-        {
-            throw new InvalidOperationException(
-                "FEHLER: Kein Admin-Benutzer vorhanden und ADMIN_PASSWORD nicht gesetzt (min. 8 Zeichen). " +
-                "Setze die Umgebungsvariable ADMIN_PASSWORD beim ersten Start.");
-        }
-        
-        db.ApplicationUsers.Add(new PrinterManager.Shared.Models.ApplicationUser
-        {
-            Username = "admin",
-            PasswordHash = BCrypt.Net.BCrypt.HashPassword(adminPassword, workFactor: 12),
-            IsActive = true,
-            IsLdapUser = false,
-            Role = PrinterManager.Shared.Models.UserRole.Administrator,
-            CreatedAt = DateTime.UtcNow
-        });
-        db.SaveChanges();
-        
-        app.Logger.LogInformation("Admin-Benutzer erstellt: admin (Passwort aus ADMIN_PASSWORD)");
-    }
-}
+// Datenbank anlegen und beim ersten Start einen Administrator erzeugen.
+await FirstRunSetup.RunAsync(app);
 
-// Warnen, wenn die Client-Endpunkte ungeschützt sind.
-if (string.IsNullOrEmpty(app.Configuration[ClientApiKeyFilter.ConfigurationKey]))
-{
-    app.Logger.LogWarning(
-        "{ConfigKey} ist nicht gesetzt: /api/clients/register und /api/clients/actions sind " +
-        "ohne Authentifizierung erreichbar. Setze einen Schlüssel und trage ihn bei den Clients " +
-        "unter \"ClientApiKey\" ein.",
-        ClientApiKeyFilter.ConfigurationKey);
-}
+StartupReport.Write(app, secrets);
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())

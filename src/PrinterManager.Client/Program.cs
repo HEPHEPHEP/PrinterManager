@@ -41,9 +41,9 @@ using (var currentProcess = System.Diagnostics.Process.GetCurrentProcess())
 
 if (string.IsNullOrEmpty(configuration["ClientApiKey"]))
 {
-    logger.LogWarning(
-        "ClientApiKey ist nicht gesetzt. Wenn der Server \"ClientApi:Key\" konfiguriert hat, " +
-        "werden die Anfragen mit HTTP 401 abgelehnt.");
+    logger.LogInformation(
+        "Kein ClientApiKey gesetzt — das genügt, solange der Server \"ClientApi:RequireKey\" " +
+        "nicht aktiviert hat. Der Server nennt den Schlüssel in seiner Startausgabe.");
 }
 
 host.Run();

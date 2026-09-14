@@ -11,6 +11,28 @@ Der Windows Printer Manager ermöglicht die zentrale Verwaltung von Netzwerkdruc
 3. **Web Application** - Blazor Server UI für Verwaltung
 <img width="1909" height="495" alt="grafik" src="https://github.com/user-attachments/assets/42c5f3a0-2820-4193-b557-a75516344973" />
 
+## Schnellstart
+
+Drei Terminals, keine Vorbereitung:
+
+```bash
+# 1. Server (erzeugt Schlüssel, Datenbank und Admin-Benutzer selbst)
+cd src/PrinterManager.Server && dotnet run
+
+# 2. Web-Oberfläche  ->  http://localhost:5001
+cd src/PrinterManager.Web && dotnet run
+
+# 3. Client (nur unter Windows)
+cd src/PrinterManager.Client && dotnet run
+```
+
+Das Passwort für den Benutzer `admin` steht in der Startausgabe des Servers und in
+`src/PrinterManager.Server/initial-admin-password.txt`.
+
+Damit läuft alles, ist aber noch **nicht produktionsreif**: siehe
+[Erst-Anmeldung](#erst-anmeldung) und
+[Client-Endpunkte absichern](#client-endpunkte-absichern).
+
 ## Hauptfunktionen
 
 ### Druckerverwaltung
@@ -111,38 +133,50 @@ PrinterManager/
 
 ### Server installieren
 
-1. Server kompilieren:
+1. Server kompilieren und starten — mehr ist für den ersten Start nicht nötig:
 ```bash
 cd src/PrinterManager.Server
-dotnet build -c Release
+dotnet run --urls "http://0.0.0.0:5000"
 ```
 
-2. Konfiguration anpassen (`appsettings.json`):
+Beim ersten Start legt der Server selbst an:
+- `Jwt:Key` und `ClientApi:Key` — erzeugt und gespeichert in `appsettings.Local.json`
+  (die Datei ist in `.gitignore`; die Werte überleben Neustarts, damit ausgestellte
+  Tokens gültig bleiben)
+- die SQLite-Datenbank
+- den Administrator `admin` mit erzeugtem Passwort
+
+Das Passwort steht in der Startausgabe und zusätzlich in `initial-admin-password.txt`:
+
+```
+======================================================================
+ ERSTEINRICHTUNG — Administrator angelegt
+ Benutzer:  admin
+ Passwort:  Kf3mQp9xRt2vLw7nBz4hYs6d
+ ...
+======================================================================
+```
+
+Wer das Passwort selbst vorgeben will, setzt vor dem ersten Start `ADMIN_PASSWORD`
+(mindestens 8 Zeichen):
+
+```bash
+ADMIN_PASSWORD='ein-sicheres-passwort' dotnet run --urls "http://0.0.0.0:5000"
+```
+
+2. Optional: `appsettings.json` anpassen
+
 ```json
 {
   "ConnectionStrings": {
     "DefaultConnection": "Data Source=printermanager.db"
-  },
-  "Jwt": {
-    "Key": "MINDESTENS_32_ZEICHEN_LANGER_GEHEIMER_SCHLUESSEL"
-  },
-  "Cors": {
-    "AllowedOrigins": [ "https://printermanager.meinefirma.de" ]
-  },
-  "ClientApi": {
-    "Key": "zufaelliger-schluessel-fuer-die-clients"
   }
 }
 ```
 
-`Jwt:Key` ist Pflicht (min. 32 Zeichen) — ohne ihn startet der Server nicht.
-Ist `ClientApi:Key` leer, sind die Client-Endpunkte unauthentifiziert erreichbar;
-der Server warnt dann beim Start.
-
-3. Server starten (Admin-Passwort nur beim allerersten Start nötig):
-```bash
-ADMIN_PASSWORD='ein-sicheres-passwort' dotnet run --urls "http://0.0.0.0:5000"
-```
+Alle Geheimnisse lassen sich auch fest vorgeben (`appsettings.Production.json`,
+Umgebungsvariablen wie `Jwt__Key`) — konfigurierte Werte haben immer Vorrang vor den
+automatisch erzeugten.
 
 ### Client installieren
 
@@ -152,11 +186,10 @@ cd src/PrinterManager.Client
 dotnet publish -c Release -r win-x64 --self-contained
 ```
 
-2. Konfiguration anpassen (`appsettings.json`):
+2. In `appsettings.json` die Serveradresse eintragen:
 ```json
 {
   "ServerUrl": "http://server-ip:5000",
-  "ClientApiKey": "derselbe-wert-wie-ClientApi:Key-auf-dem-Server",
   "PollIntervalSeconds": 60
 }
 ```
@@ -166,6 +199,10 @@ dotnet publish -c Release -r win-x64 --self-contained
 ```powershell
 C:\Path\To\PrinterManager.Client.exe
 ```
+
+Ein Schlüssel ist zunächst nicht nötig: die Client-Endpunkte sind offen, bis
+`ClientApi:RequireKey` aktiviert wird (siehe
+[Client-Endpunkte absichern](#client-endpunkte-absichern)).
 
 > Der Client läuft bewusst **nicht** als Windows-Dienst: Druckerverbindungen sind
 > benutzer- und sitzungsgebunden und wären aus dem `LocalSystem`-Kontext heraus für
@@ -320,22 +357,46 @@ dotnet run --urls "http://0.0.0.0:5001"
 
 ### Erst-Anmeldung
 
-Es gibt **kein** Standardpasswort. Beim ersten Start legt der Server den Benutzer `admin`
-mit dem Passwort aus der Umgebungsvariable `ADMIN_PASSWORD` an (mindestens 8 Zeichen).
-Ist sie nicht gesetzt und existiert noch kein Administrator, bricht der Start mit einer
-Fehlermeldung ab.
+Es gibt **kein** Standardpasswort. Beim ersten Start legt der Server `admin` mit einem
+zufällig erzeugten Passwort an und gibt es aus (Konsole + `initial-admin-password.txt`).
+Mit gesetztem `ADMIN_PASSWORD` wird stattdessen dieser Wert verwendet.
 
-```bash
-export ADMIN_PASSWORD='ein-sicheres-passwort'
-dotnet run
-```
+Nach der ersten Anmeldung:
+1. Passwort unter **Sicherheit → Benutzerverwaltung** ändern
+2. `initial-admin-password.txt` löschen
 
 Der letzte verbleibende Administrator kann weder gelöscht noch herabgestuft werden —
-damit ist eine Aussperrung ausgeschlossen.
+eine Aussperrung ist damit ausgeschlossen.
+
+### Client-Endpunkte absichern
+
+`POST /api/clients/register` und `GET /api/clients/actions` sind nach der Installation
+**offen**, damit die Clients ohne Schlüsselverteilung starten. Das ist für die
+Inbetriebnahme gedacht, nicht für den Dauerbetrieb — der Server weist beim Start darauf
+hin und nennt den bereits erzeugten Schlüssel.
+
+Sobald die Clients laufen:
+
+1. Schlüssel aus `appsettings.Local.json` (`ClientApi:Key`) bei jedem Client in
+   `appsettings.json` eintragen:
+   ```json
+   { "ClientApiKey": "der-erzeugte-schluessel" }
+   ```
+2. Auf dem Server in `appsettings.Local.json` (oder `appsettings.Production.json`)
+   aktivieren und neu starten:
+   ```json
+   { "ClientApi": { "RequireKey": true } }
+   ```
+
+Greift nur, wenn auch ein Schlüssel hinterlegt ist — ein Tippfehler kann also nicht
+alle Clients aussperren.
 
 ### JWT-Konfiguration
 
-In `appsettings.json` des Servers:
+`Jwt:Key` wird beim ersten Start erzeugt (64 zufällige Bytes) und in
+`appsettings.Local.json` abgelegt. Eingreifen muss man nur, wenn der Schlüssel
+woanders herkommen soll — etwa aus einem Secret-Store oder weil mehrere
+Serverinstanzen dieselben Tokens akzeptieren sollen:
 
 ```json
 {
@@ -347,7 +408,11 @@ In `appsettings.json` des Servers:
 }
 ```
 
-**⚠️ WICHTIG**: Ändern Sie den JWT-Key in Produktivumgebungen!
+Ein konfigurierter Wert hat Vorrang vor dem erzeugten. Wird der Schlüssel gewechselt,
+müssen sich alle Benutzer neu anmelden.
+
+**Wichtig bei mehreren Instanzen**: `appsettings.Local.json` wird pro Instanz erzeugt.
+Hinter einem Load Balancer muss `Jwt:Key` deshalb zentral vorgegeben werden.
 
 ### LDAP-Konfiguration
 
@@ -432,9 +497,9 @@ curl -H "X-Client-Key: IHR_CLIENT_SCHLUESSEL" \
      "https://server:5443/api/clients/actions?hostname=PC01&userPrincipalName=user@firma.de"
 ```
 
-Ist `ClientApi:Key` nicht gesetzt, bleiben diese Endpunkte offen — das ist nur als
-Übergang für bestehende Installationen gedacht und sollte in Produktivumgebungen
-nicht so bleiben.
+Die Prüfung ist erst aktiv, wenn `ClientApi:RequireKey` auf `true` steht — siehe
+[Client-Endpunkte absichern](#client-endpunkte-absichern). Bis dahin sind die
+Endpunkte offen, damit die Inbetriebnahme ohne Schlüsselverteilung funktioniert.
 
 ### Swagger/OpenAPI
 
@@ -447,11 +512,15 @@ JWT-Token im Swagger UI verwenden:
 
 ## Sicherheitshinweise
 
-- 🔒 **HTTPS verwenden**: In Produktivumgebungen nur HTTPS aktivieren
-- 🔒 **JWT-Key setzen**: Pflichtfeld, mindestens 32 Zeichen, pro Umgebung unterschiedlich
-- 🔒 **Client-Schlüssel setzen**: `ClientApi:Key` auf dem Server, `ClientApiKey` beim Client
-- 🔒 **Admin-Passwort**: über `ADMIN_PASSWORD` beim ersten Start vergeben
-- 🔒 **CORS einschränken**: `Cors:AllowedOrigins` in Produktivumgebungen befüllen
+Nach der Inbetriebnahme in dieser Reihenfolge abarbeiten:
+
+- 🔒 **Admin-Passwort ändern** und `initial-admin-password.txt` löschen
+- 🔒 **HTTPS aktivieren**: ohne TLS gehen JWT und Client-Schlüssel im Klartext über
+  das Netz und sind beliebig wiederverwendbar — das ist die wichtigste Einzelmaßnahme
+- 🔒 **Client-Endpunkte schließen**: `ClientApi:RequireKey` auf `true`
+  (siehe [Client-Endpunkte absichern](#client-endpunkte-absichern))
+- 🔒 **`appsettings.Local.json` schützen**: enthält JWT- und Client-Schlüssel,
+  Dateirechte auf das Dienstkonto beschränken
 - 🔒 **Firewall-Regeln**: Nur notwendige Ports öffnen
 - 🔒 **Client-Kommunikation**: Client-API sollte nur intern erreichbar sein
 - 🔒 **Datenbankzugriff**: SQLite-Datei mit Dateisystemberechtigungen schützen
