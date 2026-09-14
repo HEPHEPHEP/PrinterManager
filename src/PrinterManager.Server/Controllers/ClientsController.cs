@@ -15,39 +15,83 @@ public class ClientsController : ControllerBase
 {
     private readonly IClientService _clientService;
     private readonly PrinterManagerDbContext _context;
+    private readonly ILogger<ClientsController> _logger;
 
-    public ClientsController(IClientService clientService, PrinterManagerDbContext context)
+    public ClientsController(
+        IClientService clientService,
+        PrinterManagerDbContext context,
+        ILogger<ClientsController> logger)
     {
         _clientService = clientService;
         _context = context;
+        _logger = logger;
     }
 
-    /// <summary>Wird vom Client-Dienst aufgerufen — kein JWT, dafür der Client-API-Key.</summary>
+    /// <summary>Wird vom Client-Dienst aufgerufen — kein JWT, siehe ClientApi:Authentication.</summary>
     [HttpPost("register")]
     [AllowAnonymous]
-    [ClientApiKey]
+    [ClientAuthentication]
     public async Task<ActionResult<PrinterActionsResponse>> Register([FromBody] ClientRegistrationDto dto)
     {
-        if (string.IsNullOrWhiteSpace(dto.Hostname) || string.IsNullOrWhiteSpace(dto.UserPrincipalName))
-            return BadRequest(new { message = "Hostname und UserPrincipalName sind erforderlich." });
+        if (string.IsNullOrWhiteSpace(dto.Hostname))
+            return BadRequest(new { message = "Hostname ist erforderlich." });
+
+        var user = ResolveUser(dto.UserPrincipalName);
+        if (user == null)
+            return BadRequest(new { message = "UserPrincipalName ist erforderlich." });
+
+        // Ab hier gilt die ermittelte Identität, nicht die Angabe aus dem Request.
+        dto.UserPrincipalName = user;
 
         var response = await _clientService.RegisterClientAsync(dto);
         return Ok(response);
     }
 
-    /// <summary>Wird vom Client-Dienst aufgerufen — kein JWT, dafür der Client-API-Key.</summary>
+    /// <summary>Wird vom Client-Dienst aufgerufen — kein JWT, siehe ClientApi:Authentication.</summary>
     [HttpGet("actions")]
     [AllowAnonymous]
-    [ClientApiKey]
+    [ClientAuthentication]
     public async Task<ActionResult<PrinterActionsResponse>> GetActions(
         [FromQuery] string hostname,
         [FromQuery] string userPrincipalName)
     {
-        if (string.IsNullOrWhiteSpace(hostname) || string.IsNullOrWhiteSpace(userPrincipalName))
-            return BadRequest(new { message = "hostname und userPrincipalName sind erforderlich." });
+        if (string.IsNullOrWhiteSpace(hostname))
+            return BadRequest(new { message = "hostname ist erforderlich." });
 
-        var response = await _clientService.GetPrinterActionsAsync(hostname, userPrincipalName);
+        var user = ResolveUser(userPrincipalName);
+        if (user == null)
+            return BadRequest(new { message = "userPrincipalName ist erforderlich." });
+
+        var response = await _clientService.GetPrinterActionsAsync(hostname, user);
         return Ok(response);
+    }
+
+    /// <summary>
+    /// Liefert den Benutzer, für den gearbeitet wird. Ist die Anfrage authentifiziert
+    /// (Windows-Modus), zählt ausschließlich die Identität aus dem Kerberos-Ticket — sonst
+    /// könnte sich jeder Client als beliebiger Benutzer ausgeben und dessen Zuweisungen
+    /// abrufen. Ohne Authentifizierung bleibt nur die Angabe des Clients.
+    /// </summary>
+    private string? ResolveUser(string? claimed)
+    {
+        var identity = User.Identity;
+        var authenticated = identity is { IsAuthenticated: true } ? identity.Name : null;
+
+        if (string.IsNullOrEmpty(authenticated))
+        {
+            return string.IsNullOrWhiteSpace(claimed) ? null : claimed;
+        }
+
+        if (!string.IsNullOrWhiteSpace(claimed)
+            && !string.Equals(claimed, authenticated, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning(
+                "Client gab {Claimed} an, authentifiziert ist aber {Authenticated} — maßgeblich " +
+                "ist die authentifizierte Identität",
+                claimed, authenticated);
+        }
+
+        return authenticated;
     }
 
     [HttpGet]

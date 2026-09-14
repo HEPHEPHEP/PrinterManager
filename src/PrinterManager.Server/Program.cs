@@ -59,7 +59,17 @@ builder.Services.AddDbContext<PrinterManagerDbContext>(options =>
 // Add Authentication — der Schlüssel ist an dieser Stelle garantiert vorhanden,
 // weil LocalSecrets ihn sonst erzeugt hat.
 var jwtKey = builder.Configuration["Jwt:Key"]!;
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+var clientAuthenticationMode = ClientAuthenticationOptions.GetMode(builder.Configuration);
+
+var authentication = builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme);
+
+if (clientAuthenticationMode == ClientAuthenticationMode.Windows)
+{
+    // Kerberos/NTLM für die Client-Endpunkte. Die Weboberfläche bleibt bei JWT.
+    authentication.AddNegotiate();
+}
+
+authentication
     .AddJwtBearer(options =>
     {
         options.TokenValidationParameters = new TokenValidationParameters
@@ -121,6 +131,15 @@ builder.Services.AddCors(options =>
     });
 });
 
+// HTTPS-Endpunkt samt Zertifikat einrichten (übernimmt dabei den HTTP-Endpunkt).
+var https = HttpsSetup.Configure(builder);
+
+if (https.Enabled)
+{
+    // Ohne festen Port müsste die Umleitung ihn aus den Serveradressen erraten.
+    builder.Services.AddHttpsRedirection(options => options.HttpsPort = https.Port);
+}
+
 // Standard-Port, solange nichts anderes konfiguriert ist. Eine feste Listen-Adresse
 // würde "Urls", --urls und ASPNETCORE_URLS wirkungslos machen.
 var urlsConfigured = !string.IsNullOrEmpty(builder.Configuration["Urls"])
@@ -136,7 +155,7 @@ var app = builder.Build();
 // Datenbank anlegen und beim ersten Start einen Administrator erzeugen.
 await FirstRunSetup.RunAsync(app);
 
-StartupReport.Write(app, secrets);
+StartupReport.Write(app, secrets, https, clientAuthenticationMode);
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
@@ -145,7 +164,14 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-// Don't force HTTPS redirection (can be enabled via UI)
+// Umleitung erst aktivieren, wenn ein vertrauenswürdiges Zertifikat vorliegt — sonst
+// laufen die Clients in Zertifikatsfehler statt in eine funktionierende Verbindung.
+if (https.Enabled && app.Configuration.GetValue("Https:RedirectToHttps", false))
+{
+    app.UseHsts();
+    app.UseHttpsRedirection();
+}
+
 app.UseCors("Configured");
 app.UseAuthentication();
 app.UseAuthorization();

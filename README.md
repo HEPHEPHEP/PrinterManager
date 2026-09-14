@@ -29,9 +29,12 @@ cd src/PrinterManager.Client && dotnet run
 Das Passwort für den Benutzer `admin` steht in der Startausgabe des Servers und in
 `src/PrinterManager.Server/initial-admin-password.txt`.
 
+Der Server lauscht auf **HTTP 5000** und **HTTPS 5443**. Für HTTPS erzeugt er beim ersten
+Start ein selbst signiertes Zertifikat — gut zum Ausprobieren, für den Produktivbetrieb
+ist ein Zertifikat der eigenen CA nötig.
+
 Damit läuft alles, ist aber noch **nicht produktionsreif**: siehe
-[Erst-Anmeldung](#erst-anmeldung) und
-[Client-Endpunkte absichern](#client-endpunkte-absichern).
+[Produktivbetrieb vorbereiten](#produktivbetrieb-vorbereiten).
 
 ## Hauptfunktionen
 
@@ -62,9 +65,10 @@ Damit läuft alles, ist aber noch **nicht produktionsreif**: siehe
 ### Sicherheit & Authentifizierung
 - ✅ JWT-basierte Authentifizierung — **alle** API-Endpunkte sind per Fallback-Policy geschützt
 - ✅ Rollenbasierte Zugriffskontrolle (Administrator, Benutzer)
-- ✅ Client-Endpunkte über gemeinsamen Schlüssel (`X-Client-Key`) abgesichert
+- ✅ Client-Endpunkte über Kerberos/NTLM oder gemeinsamen Schlüssel absicherbar
+- ✅ Identität der Clients aus dem Kerberos-Ticket statt aus deren eigener Angabe
 - ✅ Optionale LDAP/Active Directory-Integration (LDAPS bzw. StartTLS)
-- ✅ HTTPS/SSL-Verschlüsselung
+- ✅ HTTPS mit Zertifikat aus dem Windows-Zertifikatspeicher, PFX-Datei oder selbst signiert
 - ✅ Passwort-Hashing mit BCrypt (Work Factor 12); alte SHA256-Hashes werden beim Login migriert
 - ✅ Benutzerverwaltung über Web-Interface
 
@@ -201,8 +205,8 @@ C:\Path\To\PrinterManager.Client.exe
 ```
 
 Ein Schlüssel ist zunächst nicht nötig: die Client-Endpunkte sind offen, bis
-`ClientApi:RequireKey` aktiviert wird (siehe
-[Client-Endpunkte absichern](#client-endpunkte-absichern)).
+`ClientApi:Authentication` gesetzt wird (siehe
+[Client-Authentifizierung einrichten](#client-authentifizierung-einrichten)).
 
 > Der Client läuft bewusst **nicht** als Windows-Dienst: Druckerverbindungen sind
 > benutzer- und sitzungsgebunden und wären aus dem `LocalSystem`-Kontext heraus für
@@ -368,28 +372,94 @@ Nach der ersten Anmeldung:
 Der letzte verbleibende Administrator kann weder gelöscht noch herabgestuft werden —
 eine Aussperrung ist damit ausgeschlossen.
 
-### Client-Endpunkte absichern
+### Client-Authentifizierung einrichten
 
 `POST /api/clients/register` und `GET /api/clients/actions` sind nach der Installation
-**offen**, damit die Clients ohne Schlüsselverteilung starten. Das ist für die
-Inbetriebnahme gedacht, nicht für den Dauerbetrieb — der Server weist beim Start darauf
-hin und nennt den bereits erzeugten Schlüssel.
+**offen**, damit die Clients ohne Vorbereitung starten. Das ist für die Inbetriebnahme
+gedacht, nicht für den Dauerbetrieb.
 
-Sobald die Clients laufen:
+Gesteuert wird das über `ClientApi:Authentication`:
 
-1. Schlüssel aus `appsettings.Local.json` (`ClientApi:Key`) bei jedem Client in
-   `appsettings.json` eintragen:
+| Wert | Bedeutung |
+|---|---|
+| `None` (Vorgabe) | Keine Prüfung. Jeder im Netz kann sich als beliebiger Benutzer ausgeben. |
+| `Windows` | Kerberos/NTLM. **Empfohlen in einer Domäne.** |
+| `ApiKey` | Gemeinsamer Schlüssel im Header `X-Client-Key`. |
+
+#### Windows-Authentifizierung (empfohlen)
+
+Auf dem Server eintragen und neu starten:
+
+```json
+{ "ClientApi": { "Authentication": "Windows" } }
+```
+
+Am Client ist **nichts** zu konfigurieren: er beantwortet die Negotiate-Aufforderung
+automatisch mit dem Kerberos-Ticket des angemeldeten Benutzers.
+
+Der entscheidende Gewinn liegt nicht in der Zugangssperre, sondern in der Identität: der
+Server übernimmt den Benutzer aus dem Kerberos-Ticket und ignoriert die Angabe aus dem
+Request. Ohne das kann jeder, der die Endpunkte erreicht, fremde Druckerzuweisungen
+abfragen — auch mit gemeinsamem Schlüssel, denn der steht im Klartext beim Client und ist
+für jeden angemeldeten Benutzer lesbar.
+
+Voraussetzungen:
+- Server und Clients sind in derselben Domäne (oder es besteht eine Vertrauensstellung)
+- Ein SPN zeigt auf das Dienstkonto des Servers, z. B.
+  `setspn -S HTTP/printermanager.firma.de DOMAENE\SvcPrinterManager`
+- Läuft der Server nicht unter Windows, wird eine Keytab-Datei benötigt
+
+> **Verbleibende Einschränkung**: Kerberos weist den *Benutzer* aus, nicht den Rechner —
+> der Client läuft im Benutzerkontext. Der gemeldete `Hostname` bleibt damit eine Angabe
+> des Clients. Benutzer-Zuweisungen sind fälschungssicher, Client-Zuweisungen nicht.
+
+#### Gemeinsamer Schlüssel (ohne Domäne)
+
+1. Schlüssel aus `appsettings.Local.json` (`ClientApi:Key`) bei jedem Client eintragen:
    ```json
    { "ClientApiKey": "der-erzeugte-schluessel" }
    ```
-2. Auf dem Server in `appsettings.Local.json` (oder `appsettings.Production.json`)
-   aktivieren und neu starten:
+2. Auf dem Server aktivieren und neu starten:
    ```json
-   { "ClientApi": { "RequireKey": true } }
+   { "ClientApi": { "Authentication": "ApiKey" } }
    ```
 
-Greift nur, wenn auch ein Schlüssel hinterlegt ist — ein Tippfehler kann also nicht
-alle Clients aussperren.
+Greift nur, wenn auch ein Schlüssel hinterlegt ist — ein Tippfehler kann also nicht alle
+Clients aussperren. Der Schlüssel schützt den Zugang, **nicht** die Identität: siehe oben.
+
+### HTTPS
+
+Der Server bringt einen HTTPS-Endpunkt auf Port 5443 mit (`Https:Port`). Das Zertifikat
+wird in dieser Reihenfolge gesucht:
+
+1. **Windows-Zertifikatspeicher** — `Https:CertificateThumbprint` oder
+   `Https:CertificateSubject`. Der übliche Weg in einer Domäne: das Zertifikat kommt per
+   AD-CS-Autoenrollment, es ist nichts zu verteilen.
+2. **PFX-Datei** — `Https:CertificatePath` und `Https:CertificatePassword`
+3. **SSL-Konfiguration der Oberfläche** — unter „Sicherheit → SSL" gepflegt
+4. **Selbst signiert** — wird beim ersten Start erzeugt und als
+   `printermanager-selfsigned.pfx` abgelegt
+
+Mit dem selbst signierten Zertifikat stufen Browser und Clients die Verbindung als nicht
+vertrauenswürdig ein. Für den Testbetrieb lässt sich der Fingerabdruck festnageln, statt
+die Prüfung abzuschalten — bei Client und Web-Anwendung:
+
+```json
+{ "ServerCertificateThumbprint": "AB12CD34..." }
+```
+
+Der Fingerabdruck steht in der Startausgabe des Servers.
+
+Sobald ein vertrauenswürdiges Zertifikat eingerichtet ist, HTTP-Zugriffe umleiten:
+
+```json
+{ "Https": { "RedirectToHttps": true } }
+```
+
+Das aktiviert zugleich HSTS. Vorher nicht einschalten — sonst laufen die Clients in
+Zertifikatsfehler statt in eine funktionierende Verbindung.
+
+Abschalten lässt sich HTTPS mit `"Https": { "Enabled": false }`.
 
 ### JWT-Konfiguration
 
@@ -416,51 +486,23 @@ Hinter einem Load Balancer muss `Jwt:Key` deshalb zentral vorgegeben werden.
 
 ### LDAP-Konfiguration
 
-Optionale LDAP/Active Directory-Integration in `appsettings.json`:
+LDAP wird **in der Oberfläche** unter „Sicherheit → LDAP-Einstellungen" gepflegt und in
+der Datenbank gespeichert — nicht in `appsettings.json`.
 
-```json
-{
-  "Ldap": {
-    "Enabled": true,
-    "Server": "ldap.ihrefirma.de",
-    "Port": 389,
-    "BaseDn": "dc=ihrefirma,dc=de",
-    "UserDnTemplate": "uid={0},ou=users,dc=ihrefirma,dc=de"
-  }
-}
-```
+| Feld | Beispiel |
+|---|---|
+| Server | `ldap.ihrefirma.de` |
+| Port | `636` (LDAPS) |
+| Base-DN | `dc=ihrefirma,dc=de` |
+| User-DN-Vorlage | `uid={0},ou=users,dc=ihrefirma,dc=de` |
 
-**Hinweis**: Bei LDAP-Authentifizierung werden Benutzer automatisch im System angelegt.
+Auf Port 636 wird LDAPS verwendet, sonst StartTLS versucht; gelingt das nicht, wird
+gewarnt und unverschlüsselt weitergemacht. **Port 636 verwenden**, sonst gehen die
+Zugangsdaten im Klartext über das Netz.
 
-### HTTPS/SSL
-
-Der Server läuft standardmäßig auf:
-- **HTTP**: Port 5000
-- **HTTPS**: Port 5443
-
-Für Produktivumgebungen:
-
-1. Eigenes SSL-Zertifikat erstellen:
-```bash
-dotnet dev-certs https --export-path ./certificate.pfx --password IhrPasswort
-```
-
-2. Konfiguration in `appsettings.json`:
-```json
-{
-  "Kestrel": {
-    "Endpoints": {
-      "Https": {
-        "Url": "https://*:5443",
-        "Certificate": {
-          "Path": "./certificate.pfx",
-          "Password": "IhrPasswort"
-        }
-      }
-    }
-  }
-}
-```
+Bei LDAP-Authentifizierung werden Benutzer automatisch angelegt. Schlägt die
+LDAP-Anmeldung fehl, versucht der Server anschließend die lokale Anmeldung — eine
+fehlerhafte LDAP-Konfiguration sperrt damit nicht den lokalen Administrator aus.
 
 ### Rollenbasierte Zugriffskontrolle
 
@@ -497,9 +539,9 @@ curl -H "X-Client-Key: IHR_CLIENT_SCHLUESSEL" \
      "https://server:5443/api/clients/actions?hostname=PC01&userPrincipalName=user@firma.de"
 ```
 
-Die Prüfung ist erst aktiv, wenn `ClientApi:RequireKey` auf `true` steht — siehe
-[Client-Endpunkte absichern](#client-endpunkte-absichern). Bis dahin sind die
-Endpunkte offen, damit die Inbetriebnahme ohne Schlüsselverteilung funktioniert.
+Das gilt für `ClientApi:Authentication: "ApiKey"`. Im empfohlenen Modus `"Windows"`
+läuft die Anmeldung über Kerberos und es ist kein Schlüssel im Spiel — siehe
+[Client-Authentifizierung einrichten](#client-authentifizierung-einrichten).
 
 ### Swagger/OpenAPI
 
@@ -512,16 +554,19 @@ JWT-Token im Swagger UI verwenden:
 
 ## Sicherheitshinweise
 
+### Produktivbetrieb vorbereiten
+
 Nach der Inbetriebnahme in dieser Reihenfolge abarbeiten:
 
-- 🔒 **Admin-Passwort ändern** und `initial-admin-password.txt` löschen
-- 🔒 **HTTPS aktivieren**: ohne TLS gehen JWT und Client-Schlüssel im Klartext über
-  das Netz und sind beliebig wiederverwendbar — das ist die wichtigste Einzelmaßnahme
-- 🔒 **Client-Endpunkte schließen**: `ClientApi:RequireKey` auf `true`
-  (siehe [Client-Endpunkte absichern](#client-endpunkte-absichern))
-- 🔒 **`appsettings.Local.json` schützen**: enthält JWT- und Client-Schlüssel,
-  Dateirechte auf das Dienstkonto beschränken
-- 🔒 **Firewall-Regeln**: Nur notwendige Ports öffnen
+1. 🔒 **Admin-Passwort ändern** und `initial-admin-password.txt` löschen
+2. 🔒 **Vertrauenswürdiges Zertifikat** einrichten und `Https:RedirectToHttps`
+   aktivieren (siehe [HTTPS](#https)) — ohne TLS sind alle weiteren Maßnahmen Kosmetik
+3. 🔒 **Client-Authentifizierung** auf `Windows` stellen (siehe
+   [Client-Authentifizierung einrichten](#client-authentifizierung-einrichten))
+4. 🔒 **`appsettings.Local.json` schützen**: enthält JWT- und Client-Schlüssel,
+   Dateirechte auf das Dienstkonto beschränken
+5. 🔒 **Firewall-Regeln**: nur notwendige Ports öffnen; HTTP 5000 schließen, sobald
+   alle Beteiligten auf HTTPS umgestellt sind
 - 🔒 **Client-Kommunikation**: Client-API sollte nur intern erreichbar sein
 - 🔒 **Datenbankzugriff**: SQLite-Datei mit Dateisystemberechtigungen schützen
 - 🔒 **LDAP-Verbindung**: LDAPS (Port 636) verwenden; auf Port 389 wird StartTLS versucht

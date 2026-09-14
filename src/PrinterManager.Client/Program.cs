@@ -1,5 +1,6 @@
 using PrinterManager.Client;
 using PrinterManager.Client.Services;
+using PrinterManager.Shared.Http;
 
 var builder = Host.CreateApplicationBuilder(args);
 var configuration = builder.Configuration;
@@ -23,6 +24,28 @@ builder.Services.AddHttpClient<IServerCommunicationService, ServerCommunicationS
     {
         client.DefaultRequestHeaders.Add(ServerCommunicationService.ClientKeyHeader, clientApiKey);
     }
+})
+.ConfigurePrimaryHttpMessageHandler(() =>
+{
+    var handler = new HttpClientHandler
+    {
+        // Beantwortet eine Negotiate-Aufforderung des Servers mit dem Kerberos-Ticket des
+        // angemeldeten Benutzers. Fordert der Server nichts an, wird auch nichts gesendet —
+        // die Einstellung ist deshalb immer aktiv und braucht keine Konfiguration.
+        UseDefaultCredentials = true,
+
+        // Spart den Anonym-Versuch samt 401 vor jeder Anfrage.
+        PreAuthenticate = true
+    };
+
+    // Nur nötig, solange der Server ein selbst signiertes Zertifikat verwendet.
+    var validator = ServerCertificatePinning.CreateValidator(configuration["ServerCertificateThumbprint"]);
+    if (validator != null)
+    {
+        handler.ServerCertificateCustomValidationCallback = validator;
+    }
+
+    return handler;
 });
 
 builder.Services.AddHostedService<Worker>();
@@ -42,8 +65,9 @@ using (var currentProcess = System.Diagnostics.Process.GetCurrentProcess())
 if (string.IsNullOrEmpty(configuration["ClientApiKey"]))
 {
     logger.LogInformation(
-        "Kein ClientApiKey gesetzt — das genügt, solange der Server \"ClientApi:RequireKey\" " +
-        "nicht aktiviert hat. Der Server nennt den Schlüssel in seiner Startausgabe.");
+        "Kein ClientApiKey gesetzt — wird nur gebraucht, wenn der Server " +
+        "ClientApi:Authentication auf \"ApiKey\" stellt. Bei \"Windows\" meldet sich der Client " +
+        "mit dem Kerberos-Ticket des angemeldeten Benutzers an.");
 }
 
 host.Run();

@@ -1,3 +1,4 @@
+using PrinterManager.Shared.Http;
 using PrinterManager.Web.Components;
 using PrinterManager.Web.Services;
 
@@ -17,6 +18,20 @@ builder.Services.AddHttpClient<IApiService, ApiService>((serviceProvider, client
     var config = serviceProvider.GetRequiredService<IConfiguration>();
     client.BaseAddress = new Uri(config["ApiUrl"] ?? "http://localhost:5000");
     client.Timeout = TimeSpan.FromSeconds(30);
+})
+.ConfigurePrimaryHttpMessageHandler(serviceProvider =>
+{
+    var handler = new HttpClientHandler();
+
+    // Nur nötig, solange der Server ein selbst signiertes Zertifikat verwendet.
+    var config = serviceProvider.GetRequiredService<IConfiguration>();
+    var validator = ServerCertificatePinning.CreateValidator(config["ServerCertificateThumbprint"]);
+    if (validator != null)
+    {
+        handler.ServerCertificateCustomValidationCallback = validator;
+    }
+
+    return handler;
 });
 
 var app = builder.Build();
