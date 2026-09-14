@@ -37,6 +37,7 @@ public interface IApiService
     Task<AssignmentDto> CreateAssignmentAsync(CreateAssignmentDto dto);
     Task<List<AssignmentDto>> CreateBulkAssignmentsAsync(BulkAssignmentDto dto);
     Task<bool> DeleteAssignmentAsync(int id);
+    Task<AssignmentDto> SetAssignmentAsDefaultAsync(int id);
 
     // Clients and Users
     Task<List<ClientInfo>> GetClientsAsync();
@@ -264,6 +265,18 @@ public class ApiService : IApiService
     {
         var response = await Client.DeleteAsync($"/api/assignments/{id}");
         return response.IsSuccessStatusCode;
+    }
+
+    public async Task<AssignmentDto> SetAssignmentAsDefaultAsync(int id)
+    {
+        var response = await Client.PutAsync($"/api/assignments/{id}/set-default", null);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(await ReadErrorMessageAsync(response));
+        }
+
+        return (await response.Content.ReadFromJsonAsync<AssignmentDto>())!;
     }
 
     // Clients and Users

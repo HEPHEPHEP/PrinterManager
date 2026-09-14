@@ -78,4 +78,22 @@ public class AssignmentsController : ControllerBase
 
         return NoContent();
     }
+
+    [HttpPut("{id}/set-default")]
+    [Authorize(Roles = "Administrator")]
+    public async Task<ActionResult<AssignmentDto>> SetDefault(int id)
+    {
+        try
+        {
+            var assignment = await _assignmentService.SetDefaultPrinterAsync(id);
+            if (assignment == null)
+                return NotFound();
+
+            return Ok(assignment);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
 }

@@ -139,6 +139,15 @@ else
 
 <h3>Zuweisungen</h3>
 
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
+@if (!string.IsNullOrEmpty(successMessage))
+{
+    <div class="alert alert-success">@successMessage</div>
+}
+
 @if (assignments == null)
 {
     <p><em>Lade Zuweisungen...</em></p>
@@ -155,6 +164,10 @@ else
                 <th>Drucker</th>
                 <th>Servicenummer</th>
                 <th>Standarddrucker</th>
+                @if (isAdministrator)
+                {
+                    <th>Aktionen</th>
+                }
             </tr>
         </thead>
         <tbody>
@@ -173,6 +186,17 @@ else
                             <span class="badge bg-secondary">Nein</span>
                         }
                     </td>
+                    @if (isAdministrator)
+                    {
+                        <td>
+                            @if (!assignment.IsDefaultPrinter)
+                            {
+                                <button class="btn btn-sm btn-primary" @onclick="() => SetAsDefault(assignment)">
+                                    Als Standard festlegen
+                                </button>
+                            }
+                        </td>
+                    }
                 </tr>
             }
         </tbody>
@@ -187,6 +211,10 @@ else
     private ClientInfo? client;
     private List<ClientPrinterDto>? installedPrinters;
     private List<AssignmentDto>? assignments;
+    private string errorMessage = "";
+    private string successMessage = "";
+
+    private bool isAdministrator => AuthState.Role == "Administrator";
 
     private List<ClientPrinterDto> assignedPrinters =>
         installedPrinters?.Where(p => p.ManagedPrinterId.HasValue).ToList() ?? new();
@@ -218,5 +246,25 @@ else
         // Load installed printers and assignments
         installedPrinters = await ApiService.GetClientPrintersAsync(Id);
         assignments = await ApiService.GetClientAssignmentsAsync(Id);
+    }
+
+    private async Task SetAsDefault(AssignmentDto assignment)
+    {
+        errorMessage = "";
+        successMessage = "";
+        try
+        {
+            await ApiService.SetAssignmentAsDefaultAsync(assignment.Id);
+            assignments = await ApiService.GetClientAssignmentsAsync(Id);
+
+            // Die Tabelle "Installierte Drucker" zeigt den Stand des letzten Abgleichs —
+            // ohne diesen Hinweis sähe es so aus, als hätte das Festlegen nicht gewirkt.
+            successMessage = $"{assignment.PrinterName} ist jetzt Standarddrucker. " +
+                "Der Client übernimmt das beim nächsten Abgleich.";
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Standarddrucker konnte nicht festgelegt werden: {ex.Message}";
+        }
     }
 }

@@ -330,6 +330,7 @@ Neustart hin.
 - `POST /api/assignments` - Neue Zuweisung (nur Administrator)
 - `POST /api/assignments/bulk` - Mehrere Zuweisungen (nur Administrator)
 - `DELETE /api/assignments/{id}` - Zuweisung löschen (nur Administrator)
+- `PUT /api/assignments/{id}/set-default` - Zuweisung als Standarddrucker ihres Benutzers bzw. Clients festlegen (nur Administrator)
 
 ### Clients
 - `POST /api/clients/register` - Client registrieren (Client-Schlüssel statt JWT)
