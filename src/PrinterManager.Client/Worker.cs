@@ -5,6 +5,14 @@ namespace PrinterManager.Client;
 
 public class Worker : BackgroundService
 {
+    private const int DefaultPollIntervalSeconds = 60;
+    private const int MinimumPollIntervalSeconds = 5;
+
+    private static readonly TimeSpan ErrorBackoff = TimeSpan.FromSeconds(30);
+
+    /// <summary>Wartezeit, bis Windows einen frisch verbundenen Drucker kennt.</summary>
+    private static readonly TimeSpan DefaultPrinterSettleDelay = TimeSpan.FromSeconds(2);
+
     private readonly ILogger<Worker> _logger;
     private readonly IPrinterDetectionService _printerDetection;
     private readonly IPrinterManagementService _printerManagement;
@@ -31,94 +39,131 @@ public class Worker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("PrinterManager Client starting...");
+        _logger.LogInformation("PrinterManager Client startet...");
 
-        // Configure autostart on first run
         if (!_autostartService.IsAutostartEnabled())
         {
-            _logger.LogInformation("Autostart not configured. Enabling autostart for current user...");
+            _logger.LogInformation("Autostart nicht konfiguriert — wird für den aktuellen Benutzer aktiviert");
             _autostartService.EnableAutostart();
-        }
-        else
-        {
-            _logger.LogInformation("Autostart is already configured");
         }
 
         while (!stoppingToken.IsCancellationRequested)
         {
+            var delay = PollInterval;
+
             try
             {
-                // Always register with current printer list to keep server updated
-                await RegisterAndProcessActionsAsync();
-
-                var pollInterval = _configuration.GetValue<int>("PollIntervalSeconds", 60);
-                await Task.Delay(TimeSpan.FromSeconds(pollInterval), stoppingToken);
+                await RegisterAndProcessActionsAsync(stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error in worker loop");
-                await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
+                _logger.LogError(ex, "Fehler im Worker-Durchlauf");
+                delay = ErrorBackoff;
+            }
+
+            try
+            {
+                await Task.Delay(delay, stoppingToken);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
             }
         }
+
+        _logger.LogInformation("PrinterManager Client wird beendet");
     }
 
-    private async Task RegisterAndProcessActionsAsync()
+    /// <summary>
+    /// Abfrageintervall aus der Konfiguration; zu kleine Werte würden zu einer
+    /// Dauerschleife gegen den Server führen.
+    /// </summary>
+    private TimeSpan PollInterval
     {
-        _logger.LogInformation("Registering with server and checking for actions...");
-
-        var installedPrinters = _printerDetection.GetInstalledPrinters();
-        _logger.LogInformation($"Found {installedPrinters.Count} installed printers");
-
-        var response = await _serverCommunication.RegisterAsync(installedPrinters);
-        if (response != null)
+        get
         {
-            if (_isFirstRun)
+            var seconds = _configuration.GetValue("PollIntervalSeconds", DefaultPollIntervalSeconds);
+
+            if (seconds < MinimumPollIntervalSeconds)
             {
-                _logger.LogInformation("Successfully registered with server");
-                _isFirstRun = false;
+                _logger.LogWarning(
+                    "PollIntervalSeconds={Configured} ist zu klein — es werden {Minimum} Sekunden verwendet",
+                    seconds, MinimumPollIntervalSeconds);
+                seconds = MinimumPollIntervalSeconds;
             }
 
-            if (response.Actions.Any())
-            {
-                _logger.LogInformation($"Received {response.Actions.Count} actions from server");
-                await ProcessActionsAsync(response);
-            }
-        }
-        else
-        {
-            _logger.LogWarning("Failed to register with server");
+            return TimeSpan.FromSeconds(seconds);
         }
     }
 
-    private async Task ProcessActionsAsync(PrinterActionsResponse response)
+    private async Task RegisterAndProcessActionsAsync(CancellationToken cancellationToken)
+    {
+        var installedPrinters = _printerDetection.GetInstalledPrinters();
+        _logger.LogDebug("{Count} installierte Drucker erkannt", installedPrinters.Count);
+
+        var response = await _serverCommunication.RegisterAsync(installedPrinters, cancellationToken);
+        if (response == null)
+        {
+            _logger.LogWarning("Registrierung beim Server fehlgeschlagen");
+            return;
+        }
+
+        if (_isFirstRun)
+        {
+            _logger.LogInformation("Erfolgreich beim Server registriert");
+            _isFirstRun = false;
+        }
+
+        if (response.Actions.Count > 0)
+        {
+            _logger.LogInformation("{Count} Aktionen vom Server erhalten", response.Actions.Count);
+            await ProcessActionsAsync(response, cancellationToken);
+        }
+    }
+
+    private async Task ProcessActionsAsync(PrinterActionsResponse response, CancellationToken cancellationToken)
     {
         foreach (var action in response.Actions)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             try
             {
                 switch (action.Action)
                 {
                     case PrinterAction.Install:
-                        _logger.LogInformation($"Installing printer: {action.PrinterName} ({action.SharePath})");
-                        await _printerManagement.InstallPrinterAsync(action.SharePath!);
+                        await _printerManagement.InstallPrinterAsync(action.SharePath ?? string.Empty, cancellationToken);
                         break;
 
                     case PrinterAction.Remove:
-                        _logger.LogInformation($"Removing printer: {action.PrinterName}");
-                        await _printerManagement.RemovePrinterAsync(action.PrinterName!);
+                        await _printerManagement.RemovePrinterAsync(action.PrinterName ?? string.Empty, cancellationToken);
                         break;
 
                     case PrinterAction.SetDefault:
-                        _logger.LogInformation($"Setting default printer: {action.PrinterName}");
-                        // Give printer time to install before setting as default
-                        await Task.Delay(2000);
-                        await _printerManagement.SetDefaultPrinterAsync(action.PrinterName!);
+                        // Der Drucker wurde eventuell im selben Durchlauf verbunden.
+                        await Task.Delay(DefaultPrinterSettleDelay, cancellationToken);
+                        await _printerManagement.SetDefaultPrinterAsync(
+                            action.PrinterName ?? string.Empty, action.SharePath, cancellationToken);
+                        break;
+
+                    default:
+                        _logger.LogWarning("Unbekannte Aktion {Action} für Drucker {PrinterName}",
+                            action.Action, action.PrinterName);
                         break;
                 }
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Error processing action {action.Action} for printer {action.PrinterName}");
+                _logger.LogError(ex, "Fehler bei Aktion {Action} für Drucker {PrinterName}",
+                    action.Action, action.PrinterName);
             }
         }
     }

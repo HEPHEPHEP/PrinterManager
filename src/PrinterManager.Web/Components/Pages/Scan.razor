@@ -8,7 +8,7 @@
 
 @if (!AuthState.IsAuthenticated)
 {
-    Navigation.NavigateTo("/login");
+    <RedirectToLogin />
 }
 else
 {
@@ -184,6 +184,8 @@ else if (scannedPrinters != null)
             return;
 
         int imported = 0;
+        var failed = new List<string>();
+
         foreach (var printer in toImport)
         {
             try
@@ -201,11 +203,15 @@ else if (scannedPrinters != null)
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Fehler beim Importieren von {printer.Name}: {ex.Message}");
+                failed.Add($"{printer.Name} ({ex.Message})");
             }
         }
 
         message = $"{imported} von {toImport.Count} Druckern erfolgreich importiert.";
+        if (failed.Count > 0)
+        {
+            message += $" Fehlgeschlagen: {string.Join(", ", failed)}.";
+        }
         scannedPrinters = null;
         selectedPrinters.Clear();
         existingPrinterPaths.Clear();

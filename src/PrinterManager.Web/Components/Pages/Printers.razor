@@ -3,16 +3,22 @@
 @inject IApiService ApiService
 @inject AuthStateService AuthState
 @inject NavigationManager Navigation
+@inject IJSRuntime JSRuntime
 
 <PageTitle>Drucker</PageTitle>
 
 @if (!AuthState.IsAuthenticated)
 {
-    Navigation.NavigateTo("/login");
+    <RedirectToLogin />
 }
 else
 {
 <h1>Drucker verwalten</h1>
+
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
 
 <div class="mb-3">
     <button class="btn btn-primary" @onclick="ShowAddPrinterForm">Neuer Drucker</button>
@@ -175,6 +181,7 @@ else
     private CreatePrinterDto newPrinter = new() { PrinterId = "", Name = "", SharePath = "" };
     private PrinterDto? editingPrinter;
     private UpdatePrinterDto updateDto = new();
+    private string errorMessage = "";
 
     private IEnumerable<PrinterDto> FilteredPrinters
     {
@@ -183,16 +190,23 @@ else
             if (printers == null) return Enumerable.Empty<PrinterDto>();
             if (string.IsNullOrWhiteSpace(searchText)) return printers;
 
-            var search = searchText.ToLower();
+            var search = searchText.Trim();
             return printers.Where(p =>
-                p.Name.ToLower().Contains(search) ||
-                (p.ServiceNumber != null && p.ServiceNumber.ToLower().Contains(search)) ||
-                (p.Location != null && p.Location.ToLower().Contains(search)));
+                Matches(p.Name, search) ||
+                Matches(p.ServiceNumber, search) ||
+                Matches(p.Location, search));
         }
     }
 
+    private static bool Matches(string? value, string search) =>
+        value != null && value.Contains(search, StringComparison.OrdinalIgnoreCase);
+
     protected override async Task OnInitializedAsync()
     {
+        // Ohne Anmeldung keine API-Aufrufe — der Server antwortet sonst mit 401.
+        if (!AuthState.IsAuthenticated)
+            return;
+
         await LoadPrinters();
     }
 
@@ -209,9 +223,12 @@ else
 
     private async Task AddPrinter()
     {
-        await ApiService.CreatePrinterAsync(newPrinter);
-        showAddForm = false;
-        await LoadPrinters();
+        await RunAsync(async () =>
+        {
+            await ApiService.CreatePrinterAsync(newPrinter);
+            showAddForm = false;
+            await LoadPrinters();
+        });
     }
 
     private void EditPrinter(PrinterDto printer)
@@ -229,12 +246,16 @@ else
 
     private async Task SavePrinter()
     {
-        if (editingPrinter != null)
+        var printerId = editingPrinter?.Id;
+        if (printerId == null)
+            return;
+
+        await RunAsync(async () =>
         {
-            await ApiService.UpdatePrinterAsync(editingPrinter.Id, updateDto);
+            await ApiService.UpdatePrinterAsync(printerId.Value, updateDto);
             editingPrinter = null;
             await LoadPrinters();
-        }
+        });
     }
 
     private void CancelEdit()
@@ -244,18 +265,39 @@ else
 
     private async Task ToggleAvailability(PrinterDto printer)
     {
-        await ApiService.SetPrinterAvailabilityAsync(printer.Id, !printer.IsAvailable);
-        await LoadPrinters();
+        await RunAsync(async () =>
+        {
+            await ApiService.SetPrinterAvailabilityAsync(printer.Id, !printer.IsAvailable);
+            await LoadPrinters();
+        });
+    }
+
+    /// <summary>Führt eine API-Aktion aus und macht Fehler im UI sichtbar statt sie zu verschlucken.</summary>
+    private async Task RunAsync(Func<Task> action)
+    {
+        errorMessage = "";
+        try
+        {
+            await action();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Aktion fehlgeschlagen: {ex.Message}";
+        }
     }
 
     private async Task DeletePrinter(int id)
     {
-        if (confirm("Möchten Sie diesen Drucker wirklich löschen?"))
+        var confirmed = await JSRuntime.InvokeAsync<bool>(
+            "confirm", "Möchten Sie diesen Drucker wirklich löschen?");
+
+        if (!confirmed)
+            return;
+
+        await RunAsync(async () =>
         {
             await ApiService.DeletePrinterAsync(id);
             await LoadPrinters();
-        }
+        });
     }
-
-    private bool confirm(string message) => true; // Simplified for demo
 }

@@ -1,88 +1,113 @@
-using System.Net.Http.Json;
-using System.Security.Principal;
-using PrinterManager.Shared.DTOs;
 using Microsoft.Extensions.Logging;
+using PrinterManager.Shared.DTOs;
+using System.Net.Http.Json;
+using System.Net.Sockets;
 
 namespace PrinterManager.Client.Services;
 
 public interface IServerCommunicationService
 {
-    Task<PrinterActionsResponse?> RegisterAsync(List<InstalledPrinterDto> installedPrinters);
-    Task<PrinterActionsResponse?> GetActionsAsync();
+    Task<PrinterActionsResponse?> RegisterAsync(
+        List<InstalledPrinterDto> installedPrinters, CancellationToken cancellationToken = default);
+
+    Task<PrinterActionsResponse?> GetActionsAsync(CancellationToken cancellationToken = default);
 }
 
 public class ServerCommunicationService : IServerCommunicationService
 {
+    /// <summary>Header für den gemeinsamen Client-Schlüssel (siehe Server: <c>ClientApi:Key</c>).</summary>
+    public const string ClientKeyHeader = "X-Client-Key";
+
     private readonly HttpClient _httpClient;
     private readonly IUserSessionService _userSessionService;
     private readonly ILogger<ServerCommunicationService> _logger;
     private readonly string _hostname;
-    private string _userPrincipalName;
 
     public ServerCommunicationService(
-        IConfiguration configuration,
+        HttpClient httpClient,
         IUserSessionService userSessionService,
         ILogger<ServerCommunicationService> logger)
     {
-        var serverUrl = configuration["ServerUrl"] ?? "http://localhost:5000";
-        _httpClient = new HttpClient { BaseAddress = new Uri(serverUrl) };
+        _httpClient = httpClient;
         _userSessionService = userSessionService;
         _logger = logger;
-
         _hostname = Environment.MachineName;
-        _userPrincipalName = string.Empty; // Will be set dynamically
     }
 
-    public async Task<PrinterActionsResponse?> RegisterAsync(List<InstalledPrinterDto> installedPrinters)
+    public async Task<PrinterActionsResponse?> RegisterAsync(
+        List<InstalledPrinterDto> installedPrinters, CancellationToken cancellationToken = default)
+    {
+        var userPrincipalName = _userSessionService.GetLoggedInUser();
+
+        var dto = new ClientRegistrationDto
+        {
+            Hostname = _hostname,
+            UserPrincipalName = userPrincipalName,
+            IpAddress = GetLocalIpAddress(),
+            OperatingSystem = Environment.OSVersion.ToString(),
+            InstalledPrinters = installedPrinters
+        };
+
+        _logger.LogDebug("Registrierung: {Hostname}, Benutzer: {User}, Drucker: {Count}",
+            _hostname, userPrincipalName, installedPrinters.Count);
+
+        return await SendAsync(
+            () => _httpClient.PostAsJsonAsync("/api/clients/register", dto, cancellationToken),
+            cancellationToken);
+    }
+
+    public async Task<PrinterActionsResponse?> GetActionsAsync(CancellationToken cancellationToken = default)
+    {
+        var userPrincipalName = _userSessionService.GetLoggedInUser();
+
+        var url = "/api/clients/actions" +
+                  $"?hostname={Uri.EscapeDataString(_hostname)}" +
+                  $"&userPrincipalName={Uri.EscapeDataString(userPrincipalName)}";
+
+        _logger.LogDebug("Aktionen abrufen für {Hostname}, Benutzer: {User}", _hostname, userPrincipalName);
+
+        return await SendAsync(() => _httpClient.GetAsync(url, cancellationToken), cancellationToken);
+    }
+
+    private async Task<PrinterActionsResponse?> SendAsync(
+        Func<Task<HttpResponseMessage>> send, CancellationToken cancellationToken)
     {
         try
         {
-            // Get current logged-in user
-            _userPrincipalName = _userSessionService.GetLoggedInUser();
+            using var response = await send();
 
-            var dto = new ClientRegistrationDto
+            if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
             {
-                Hostname = _hostname,
-                UserPrincipalName = _userPrincipalName,
-                IpAddress = GetLocalIpAddress(),
-                OperatingSystem = Environment.OSVersion.ToString(),
-                InstalledPrinters = installedPrinters
-            };
+                _logger.LogError(
+                    "Der Server hat die Anfrage abgelehnt (401). Stimmt \"ClientApiKey\" mit dem " +
+                    "Serverwert \"ClientApi:Key\" überein?");
+                return null;
+            }
 
-            _logger.LogDebug($"Sending registration to server: {_hostname}, User: {_userPrincipalName}, Printers: {installedPrinters.Count}");
-            var response = await _httpClient.PostAsJsonAsync("/api/clients/register", dto);
             response.EnsureSuccessStatusCode();
 
-            var result = await response.Content.ReadFromJsonAsync<PrinterActionsResponse>();
-            _logger.LogDebug($"Received {result?.Actions?.Count ?? 0} actions from server");
+            var result = await response.Content.ReadFromJsonAsync<PrinterActionsResponse>(cancellationToken);
+            _logger.LogDebug("{Count} Aktionen empfangen", result?.Actions.Count ?? 0);
             return result;
         }
-        catch (Exception ex)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            _logger.LogError(ex, "Error registering with server");
+            throw;
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning("Server nicht erreichbar ({BaseAddress}): {Message}",
+                _httpClient.BaseAddress, ex.Message);
             return null;
         }
-    }
-
-    public async Task<PrinterActionsResponse?> GetActionsAsync()
-    {
-        try
+        catch (TaskCanceledException)
         {
-            // Get current logged-in user
-            _userPrincipalName = _userSessionService.GetLoggedInUser();
-
-            _logger.LogDebug($"Getting actions from server for {_hostname}, User: {_userPrincipalName}");
-            var response = await _httpClient.GetAsync(
-                $"/api/clients/actions?hostname={_hostname}&userPrincipalName={Uri.EscapeDataString(_userPrincipalName)}");
-
-            response.EnsureSuccessStatusCode();
-            var result = await response.Content.ReadFromJsonAsync<PrinterActionsResponse>();
-            _logger.LogDebug($"Received {result?.Actions?.Count ?? 0} actions from server");
-            return result;
+            _logger.LogWarning("Zeitüberschreitung bei der Serveranfrage ({BaseAddress})", _httpClient.BaseAddress);
+            return null;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error getting actions from server");
+            _logger.LogError(ex, "Fehler bei der Kommunikation mit dem Server");
             return null;
         }
     }
@@ -94,13 +119,16 @@ public class ServerCommunicationService : IServerCommunicationService
             var host = System.Net.Dns.GetHostEntry(System.Net.Dns.GetHostName());
             foreach (var ip in host.AddressList)
             {
-                if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                if (ip.AddressFamily == AddressFamily.InterNetwork)
                 {
                     return ip.ToString();
                 }
             }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Lokale IP-Adresse konnte nicht ermittelt werden");
+        }
 
         return "Unknown";
     }

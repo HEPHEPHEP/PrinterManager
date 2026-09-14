@@ -9,14 +9,6 @@ public class LdapConfigDto
     public required string UserDnTemplate { get; set; }
 }
 
-public class SslConfigDto
-{
-    public bool Enabled { get; set; }
-    public int HttpsPort { get; set; }
-    public string? CertificatePath { get; set; }
-    public string? CertificatePassword { get; set; }
-}
-
 public class UpdateUserRoleDto
 {
     public required string Role { get; set; }

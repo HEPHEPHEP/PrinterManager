@@ -1,3 +1,4 @@
+using PrinterManager.Shared.Http;
 using PrinterManager.Web.Components;
 using PrinterManager.Web.Services;
 
@@ -7,17 +8,31 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-builder.Services.AddSingleton<AuthStateService>();
-builder.Services.AddScoped<AuthTokenHandler>();
+// WICHTIG: Scoped, nicht Singleton! In Blazor Server entspricht "Scoped" genau einer
+// Benutzer-Verbindung (Circuit). Als Singleton würden sich ALLE Besucher Token, Benutzername
+// und Rolle teilen — wer sich anmeldet, meldet damit alle anderen mit an.
+builder.Services.AddScoped<AuthStateService>();
 
 builder.Services.AddHttpClient<IApiService, ApiService>((serviceProvider, client) =>
 {
     var config = serviceProvider.GetRequiredService<IConfiguration>();
-    var apiUrl = config["ApiUrl"] ?? "http://localhost:5000";
-    client.BaseAddress = new Uri(apiUrl);
-    Console.WriteLine($"Configuring HttpClient with BaseAddress: {apiUrl}");
+    client.BaseAddress = new Uri(config["ApiUrl"] ?? "http://localhost:5000");
+    client.Timeout = TimeSpan.FromSeconds(30);
 })
-.AddHttpMessageHandler<AuthTokenHandler>();
+.ConfigurePrimaryHttpMessageHandler(serviceProvider =>
+{
+    var handler = new HttpClientHandler();
+
+    // Nur nötig, solange der Server ein selbst signiertes Zertifikat verwendet.
+    var config = serviceProvider.GetRequiredService<IConfiguration>();
+    var validator = ServerCertificatePinning.CreateValidator(config["ServerCertificateThumbprint"]);
+    if (validator != null)
+    {
+        handler.ServerCertificateCustomValidationCallback = validator;
+    }
+
+    return handler;
+});
 
 var app = builder.Build();
 

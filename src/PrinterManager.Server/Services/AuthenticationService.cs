@@ -5,6 +5,7 @@ using PrinterManager.Shared.DTOs;
 using PrinterManager.Shared.Models;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace PrinterManager.Server.Services;
@@ -21,86 +22,113 @@ public interface IAuthenticationService
 
 public class AuthenticationService : IAuthenticationService
 {
+    /// <summary>Mindestlänge für lokale Passwörter.</summary>
+    public const int MinimumPasswordLength = 8;
+
+    /// <summary>Gültigkeit ausgestellter Tokens, sofern nichts konfiguriert ist.</summary>
+    public const int DefaultTokenLifetimeHours = 8;
+
+    private const int BcryptWorkFactor = 12;
+
+    /// <summary>
+    /// BCrypt-Hash eines Zufallswerts. Wird für unbekannte Benutzer verifiziert, damit die
+    /// Antwortzeit keine Rückschlüsse auf existierende Benutzernamen zulässt.
+    /// </summary>
+    private static readonly string DummyHash =
+        BCrypt.Net.BCrypt.HashPassword(Guid.NewGuid().ToString(), BcryptWorkFactor);
+
     private readonly PrinterManagerDbContext _context;
     private readonly ILdapService _ldapService;
     private readonly IConfiguration _configuration;
+    private readonly ILogger<AuthenticationService> _logger;
 
     public AuthenticationService(
         PrinterManagerDbContext context,
         ILdapService ldapService,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        ILogger<AuthenticationService> logger)
     {
         _context = context;
         _ldapService = ldapService;
         _configuration = configuration;
+        _logger = logger;
     }
 
     public async Task<LoginResponseDto> LoginAsync(LoginDto dto)
     {
-        // Try LDAP authentication if enabled
+        var invalidCredentials = new LoginResponseDto
+        {
+            Success = false,
+            Message = "Ungültiger Benutzername oder Passwort"
+        };
+
+        if (string.IsNullOrWhiteSpace(dto.Username) || string.IsNullOrEmpty(dto.Password))
+        {
+            return invalidCredentials;
+        }
+
         if (await _ldapService.IsEnabledAsync())
         {
             var ldapAuth = await _ldapService.AuthenticateAsync(dto.Username, dto.Password);
             if (ldapAuth.Success)
             {
-                // Create or update LDAP user in database
                 var ldapUser = await GetOrCreateLdapUserAsync(dto.Username, ldapAuth.FullName, ldapAuth.Email);
+
+                if (!ldapUser.IsActive)
+                {
+                    _logger.LogInformation("Login für deaktivierten LDAP-Benutzer {Username} abgelehnt", dto.Username);
+                    return invalidCredentials;
+                }
+
                 ldapUser.LastLogin = DateTime.UtcNow;
                 await _context.SaveChangesAsync();
 
-                var token = GenerateJwtToken(ldapUser);
                 return new LoginResponseDto
                 {
                     Success = true,
-                    Token = token,
+                    Token = GenerateJwtToken(ldapUser),
                     Username = ldapUser.Username,
                     Role = ldapUser.Role.ToString()
                 };
             }
-            // If LDAP is enabled but auth failed, don't try local auth
-            return new LoginResponseDto
-            {
-                Success = false,
-                Message = "LDAP-Authentifizierung fehlgeschlagen"
-            };
+
+            // Fällt bewusst auf die lokale Anmeldung zurück: sonst sperrt eine fehlerhafte
+            // LDAP-Konfiguration auch den lokalen Administrator aus. LDAP-Benutzer selbst
+            // haben keinen lokalen Hash und können sich hier nicht anmelden.
+            _logger.LogInformation(
+                "LDAP-Anmeldung für {Username} fehlgeschlagen — versuche lokale Anmeldung", dto.Username);
         }
 
-        // Local authentication
         var user = await _context.ApplicationUsers
-            .FirstOrDefaultAsync(u => u.Username == dto.Username && u.IsActive);
+            .FirstOrDefaultAsync(u => u.Username == dto.Username && u.IsActive && !u.IsLdapUser);
 
-        if (user == null)
+        if (user == null || string.IsNullOrEmpty(user.PasswordHash))
         {
-            return new LoginResponseDto
-            {
-                Success = false,
-                Message = "Ungültiger Benutzername oder Passwort"
-            };
+            // Gleiche Arbeit wie bei einem existierenden Benutzer, um Timing-Angriffe
+            // zur Benutzernamen-Erkennung zu vermeiden.
+            BCrypt.Net.BCrypt.Verify(dto.Password, DummyHash);
+            return invalidCredentials;
         }
 
         if (!VerifyPassword(dto.Password, user.PasswordHash))
         {
-            return new LoginResponseDto
-            {
-                Success = false,
-                Message = "Ungültiger Benutzername oder Passwort"
-            };
+            return invalidCredentials;
         }
 
-        // Automatische Hash-Migration: SHA256 → BCrypt beim nächsten Login
-        if (!user.PasswordHash.StartsWith("$2"))
+        // Automatische Hash-Migration: SHA256 -> BCrypt beim nächsten Login
+        if (!IsBcryptHash(user.PasswordHash))
         {
             user.PasswordHash = HashPassword(dto.Password);
+            _logger.LogInformation("Passwort-Hash für {Username} auf BCrypt migriert", user.Username);
         }
 
         user.LastLogin = DateTime.UtcNow;
         await _context.SaveChangesAsync();
 
-        var jwtToken = GenerateJwtToken(user);
         return new LoginResponseDto
         {
             Success = true,
-            Token = jwtToken,
+            Token = GenerateJwtToken(user),
             Username = user.Username,
             Role = user.Role.ToString()
         };
@@ -108,6 +136,14 @@ public class AuthenticationService : IAuthenticationService
 
     public async Task<UserDto> RegisterUserAsync(RegisterUserDto dto)
     {
+        if (string.IsNullOrWhiteSpace(dto.Username))
+        {
+            throw new ArgumentException("Benutzername ist erforderlich.");
+        }
+
+        var role = ParseRole(dto.Role);
+        ValidatePassword(dto.Password);
+
         if (await _context.ApplicationUsers.AnyAsync(u => u.Username == dto.Username))
         {
             throw new InvalidOperationException("Benutzername bereits vergeben");
@@ -119,23 +155,14 @@ public class AuthenticationService : IAuthenticationService
             Email = dto.Email,
             FullName = dto.FullName,
             PasswordHash = HashPassword(dto.Password),
-            Role = Enum.Parse<UserRole>(dto.Role),
+            Role = role,
             IsLdapUser = false
         };
 
         _context.ApplicationUsers.Add(user);
         await _context.SaveChangesAsync();
 
-        return new UserDto
-        {
-            Id = user.Id,
-            Username = user.Username,
-            Email = user.Email,
-            FullName = user.FullName,
-            IsActive = user.IsActive,
-            IsLdapUser = user.IsLdapUser,
-            Role = user.Role.ToString()
-        };
+        return ToDto(user);
     }
 
     public async Task<List<UserDto>> GetAllUsersAsync()
@@ -161,6 +188,8 @@ public class AuthenticationService : IAuthenticationService
         if (user == null)
             return false;
 
+        await EnsureNotLastAdministratorAsync(user, "Der letzte Administrator kann nicht gelöscht werden.");
+
         _context.ApplicationUsers.Remove(user);
         await _context.SaveChangesAsync();
         return true;
@@ -172,26 +201,30 @@ public class AuthenticationService : IAuthenticationService
         if (user == null)
             return null;
 
+        var role = ParseRole(dto.Role);
+
+        if (!string.IsNullOrEmpty(dto.Password))
+        {
+            ValidatePassword(dto.Password);
+        }
+
+        if (role != UserRole.Administrator)
+        {
+            await EnsureNotLastAdministratorAsync(user,
+                "Dem letzten Administrator können die Rechte nicht entzogen werden.");
+        }
+
         user.Email = dto.Email;
         user.FullName = dto.FullName;
         if (!string.IsNullOrEmpty(dto.Password))
         {
             user.PasswordHash = HashPassword(dto.Password);
         }
-        user.Role = Enum.Parse<UserRole>(dto.Role);
+        user.Role = role;
 
         await _context.SaveChangesAsync();
 
-        return new UserDto
-        {
-            Id = user.Id,
-            Username = user.Username,
-            Email = user.Email,
-            FullName = user.FullName,
-            IsActive = user.IsActive,
-            IsLdapUser = user.IsLdapUser,
-            Role = user.Role.ToString()
-        };
+        return ToDto(user);
     }
 
     public async Task<UserDto?> UpdateUserRoleAsync(int id, UpdateUserRoleDto dto)
@@ -200,20 +233,67 @@ public class AuthenticationService : IAuthenticationService
         if (user == null)
             return null;
 
-        user.Role = Enum.Parse<UserRole>(dto.Role);
+        var role = ParseRole(dto.Role);
+
+        if (role != UserRole.Administrator)
+        {
+            await EnsureNotLastAdministratorAsync(user,
+                "Dem letzten Administrator können die Rechte nicht entzogen werden.");
+        }
+
+        user.Role = role;
         await _context.SaveChangesAsync();
 
-        return new UserDto
-        {
-            Id = user.Id,
-            Username = user.Username,
-            Email = user.Email,
-            FullName = user.FullName,
-            IsActive = user.IsActive,
-            IsLdapUser = user.IsLdapUser,
-            Role = user.Role.ToString()
-        };
+        return ToDto(user);
     }
+
+    private async Task EnsureNotLastAdministratorAsync(ApplicationUser user, string message)
+    {
+        if (user.Role != UserRole.Administrator)
+            return;
+
+        var otherAdmins = await _context.ApplicationUsers
+            .CountAsync(u => u.Role == UserRole.Administrator && u.IsActive && u.Id != user.Id);
+
+        if (otherAdmins == 0)
+        {
+            throw new InvalidOperationException(message);
+        }
+    }
+
+    private static UserRole ParseRole(string? role)
+    {
+        if (string.IsNullOrWhiteSpace(role))
+            return UserRole.User;
+
+        if (!Enum.TryParse<UserRole>(role, ignoreCase: true, out var parsed) || !Enum.IsDefined(parsed))
+        {
+            throw new ArgumentException(
+                $"Ungültige Rolle '{role}'. Erlaubt: {string.Join(", ", Enum.GetNames<UserRole>())}.");
+        }
+
+        return parsed;
+    }
+
+    private static void ValidatePassword(string? password)
+    {
+        if (string.IsNullOrWhiteSpace(password) || password.Length < MinimumPasswordLength)
+        {
+            throw new ArgumentException($"Das Passwort muss mindestens {MinimumPasswordLength} Zeichen lang sein.");
+        }
+    }
+
+    private static UserDto ToDto(ApplicationUser user) => new()
+    {
+        Id = user.Id,
+        Username = user.Username,
+        Email = user.Email,
+        FullName = user.FullName,
+        IsActive = user.IsActive,
+        IsLdapUser = user.IsLdapUser,
+        Role = user.Role.ToString(),
+        LastLogin = user.LastLogin
+    };
 
     private async Task<ApplicationUser> GetOrCreateLdapUserAsync(string username, string? fullName, string? email)
     {
@@ -254,38 +334,63 @@ public class AuthenticationService : IAuthenticationService
         {
             new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new Claim(ClaimTypes.Name, user.Username),
-            new Claim(ClaimTypes.Role, user.Role.ToString())
+            new Claim(ClaimTypes.Role, user.Role.ToString()),
+            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
+
+        // Die Gültigkeit begrenzt zugleich, wie lange eine entzogene Rolle noch wirkt —
+        // Tokens lassen sich nicht widerrufen.
+        var lifetimeHours = _configuration.GetValue("Jwt:TokenLifetimeHours", DefaultTokenLifetimeHours);
+        if (lifetimeHours is < 1 or > 720)
+        {
+            lifetimeHours = DefaultTokenLifetimeHours;
+        }
 
         var token = new JwtSecurityToken(
             issuer: _configuration["Jwt:Issuer"] ?? "PrinterManager",
             audience: _configuration["Jwt:Audience"] ?? "PrinterManager",
             claims: claims,
-            expires: DateTime.UtcNow.AddHours(8),
+            expires: DateTime.UtcNow.AddHours(lifetimeHours),
             signingCredentials: credentials
         );
 
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
+    private static bool IsBcryptHash(string hash) => hash.StartsWith("$2", StringComparison.Ordinal);
+
     private static string HashPassword(string password)
     {
-        return BCrypt.Net.BCrypt.HashPassword(password, workFactor: 12);
+        return BCrypt.Net.BCrypt.HashPassword(password, BcryptWorkFactor);
     }
 
     private static bool VerifyPassword(string password, string hash)
     {
         // Abwärtskompatibilität: alte SHA256-Hashes erkennen und beim Login migrieren
-        if (!hash.StartsWith("$2"))
+        // (siehe LoginAsync). Neue Hashes werden immer mit BCrypt erzeugt.
+        if (!IsBcryptHash(hash))
         {
-            // Altes SHA256-Format — prüfen und bei Erfolg Hash upgraden
-            using var sha256 = System.Security.Cryptography.SHA256.Create();
-            var oldHash = Convert.ToBase64String(
-                sha256.ComputeHash(Encoding.UTF8.GetBytes(password)));
-            return oldHash == hash;
-            // Hinweis: Der Aufrufer sollte nach erfolgreichem Login den Hash
-            // mit HashPassword() neu setzen (siehe LoginAsync Migration)
+            var computed = SHA256.HashData(Encoding.UTF8.GetBytes(password));
+            byte[] stored;
+            try
+            {
+                stored = Convert.FromBase64String(hash);
+            }
+            catch (FormatException)
+            {
+                return false;
+            }
+
+            return CryptographicOperations.FixedTimeEquals(computed, stored);
         }
-        return BCrypt.Net.BCrypt.Verify(password, hash);
+
+        try
+        {
+            return BCrypt.Net.BCrypt.Verify(password, hash);
+        }
+        catch (BCrypt.Net.SaltParseException)
+        {
+            return false;
+        }
     }
 }

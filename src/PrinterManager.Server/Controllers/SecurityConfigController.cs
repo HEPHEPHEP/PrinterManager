@@ -27,21 +27,14 @@ public class SecurityConfigController : ControllerBase
     [HttpPut("ldap")]
     public async Task<ActionResult<LdapConfigDto>> UpdateLdapConfig([FromBody] LdapConfigDto dto)
     {
-        var config = await _securityConfigService.UpdateLdapConfigAsync(dto);
-        return Ok(config);
-    }
-
-    [HttpGet("ssl")]
-    public async Task<ActionResult<SslConfigDto>> GetSslConfig()
-    {
-        var config = await _securityConfigService.GetSslConfigAsync();
-        return Ok(config);
-    }
-
-    [HttpPut("ssl")]
-    public async Task<ActionResult<SslConfigDto>> UpdateSslConfig([FromBody] SslConfigDto dto)
-    {
-        var config = await _securityConfigService.UpdateSslConfigAsync(dto);
-        return Ok(config);
+        try
+        {
+            var config = await _securityConfigService.UpdateLdapConfigAsync(dto);
+            return Ok(config);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 }

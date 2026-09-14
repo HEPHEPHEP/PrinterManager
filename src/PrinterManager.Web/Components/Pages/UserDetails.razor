@@ -8,7 +8,7 @@
 
 @if (!AuthState.IsAuthenticated)
 {
-    Navigation.NavigateTo("/login");
+    <RedirectToLogin />
 }
 else if (user == null)
 {
@@ -102,6 +102,10 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        // Ohne Anmeldung keine API-Aufrufe — der Server antwortet sonst mit 401.
+        if (!AuthState.IsAuthenticated)
+            return;
+
         await LoadData();
     }
 

@@ -25,6 +25,7 @@ packages/
 # Environment & Secrets
 appsettings.Production.json
 appsettings.Local.json
+initial-admin-password.txt
 *.pfx
 *.pem
 *.key

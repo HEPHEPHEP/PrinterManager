@@ -1,0 +1,10 @@
+@inject NavigationManager Navigation
+
+@code {
+    // Navigation gehört in den Lebenszyklus, nicht in die Render-Ausgabe: ein
+    // NavigateTo mitten im Markup läuft bei jedem Render erneut.
+    protected override void OnInitialized()
+    {
+        Navigation.NavigateTo("login");
+    }
+}

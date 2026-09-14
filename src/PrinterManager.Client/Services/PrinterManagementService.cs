@@ -1,157 +1,208 @@
-using System.Diagnostics;
-using System.Management;
-using PrinterManager.Shared.DTOs;
 using Microsoft.Extensions.Logging;
+using System.Diagnostics;
+using System.Text;
 
 namespace PrinterManager.Client.Services;
 
 public interface IPrinterManagementService
 {
-    Task<bool> InstallPrinterAsync(string sharePath);
-    Task<bool> RemovePrinterAsync(string printerName);
-    Task<bool> SetDefaultPrinterAsync(string printerName);
+    Task<bool> InstallPrinterAsync(string sharePath, CancellationToken cancellationToken = default);
+    Task<bool> RemovePrinterAsync(string printerName, CancellationToken cancellationToken = default);
+    Task<bool> SetDefaultPrinterAsync(string printerName, string? sharePath, CancellationToken cancellationToken = default);
 }
 
 public class PrinterManagementService : IPrinterManagementService
 {
+    private static readonly TimeSpan ScriptTimeout = TimeSpan.FromMinutes(2);
+
     private readonly ILogger<PrinterManagementService> _logger;
 
     public PrinterManagementService(ILogger<PrinterManagementService> logger)
     {
         _logger = logger;
     }
-    public async Task<bool> InstallPrinterAsync(string sharePath)
-    {
-        try
-        {
-            _logger.LogInformation($"Attempting to install printer from share path: {sharePath}");
-            var script = $@"
-                $printerPath = '{sharePath}'
-                Add-Printer -ConnectionName $printerPath -ErrorAction Stop
-            ";
 
-            var result = await ExecutePowerShellAsync(script);
-            if (result)
-            {
-                _logger.LogInformation($"Successfully installed printer: {sharePath}");
-            }
-            else
-            {
-                _logger.LogWarning($"Failed to install printer: {sharePath}");
-            }
-            return result;
-        }
-        catch (Exception ex)
+    public async Task<bool> InstallPrinterAsync(string sharePath, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(sharePath))
         {
-            _logger.LogError(ex, $"Error installing printer {sharePath}");
+            _logger.LogWarning("Installation übersprungen: kein Freigabepfad angegeben");
             return false;
         }
+
+        _logger.LogInformation("Installiere Drucker von Freigabe {SharePath}", sharePath);
+
+        var script = $"Add-Printer -ConnectionName {Quote(sharePath)} -ErrorAction Stop";
+        var result = await ExecutePowerShellAsync(script, cancellationToken);
+
+        if (result)
+            _logger.LogInformation("Drucker installiert: {SharePath}", sharePath);
+        else
+            _logger.LogWarning("Installation fehlgeschlagen: {SharePath}", sharePath);
+
+        return result;
     }
 
-    public async Task<bool> RemovePrinterAsync(string printerName)
+    public async Task<bool> RemovePrinterAsync(string printerName, CancellationToken cancellationToken = default)
     {
-        try
+        if (string.IsNullOrWhiteSpace(printerName))
         {
-            _logger.LogInformation($"Attempting to remove printer: {printerName}");
-            var script = $@"
-                $printerName = '{printerName}'
-                Remove-Printer -Name $printerName -ErrorAction Stop
-            ";
-
-            var result = await ExecutePowerShellAsync(script);
-            if (result)
-            {
-                _logger.LogInformation($"Successfully removed printer: {printerName}");
-            }
-            else
-            {
-                _logger.LogWarning($"Failed to remove printer: {printerName}");
-            }
-            return result;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, $"Error removing printer {printerName}");
+            _logger.LogWarning("Entfernen übersprungen: kein Druckername angegeben");
             return false;
         }
+
+        _logger.LogInformation("Entferne Drucker {PrinterName}", printerName);
+
+        var script = $"Remove-Printer -Name {Quote(printerName)} -ErrorAction Stop";
+        var result = await ExecutePowerShellAsync(script, cancellationToken);
+
+        if (result)
+            _logger.LogInformation("Drucker entfernt: {PrinterName}", printerName);
+        else
+            _logger.LogWarning("Entfernen fehlgeschlagen: {PrinterName}", printerName);
+
+        return result;
     }
 
-    public async Task<bool> SetDefaultPrinterAsync(string printerName)
+    public async Task<bool> SetDefaultPrinterAsync(
+        string printerName, string? sharePath, CancellationToken cancellationToken = default)
     {
-        try
+        if (string.IsNullOrWhiteSpace(printerName) && string.IsNullOrWhiteSpace(sharePath))
         {
-            _logger.LogInformation($"Attempting to set default printer: {printerName}");
-            var script = $@"
-                $printerName = '{printerName}'
-                $printer = Get-CimInstance -ClassName Win32_Printer | Where-Object {{ $_.Name -eq $printerName }}
-                if ($printer) {{
-                    Invoke-CimMethod -InputObject $printer -MethodName SetDefaultPrinter
-                }}
-            ";
-
-            var result = await ExecutePowerShellAsync(script);
-            if (result)
-            {
-                _logger.LogInformation($"Successfully set default printer: {printerName}");
-            }
-            else
-            {
-                _logger.LogWarning($"Failed to set default printer: {printerName}");
-            }
-            return result;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, $"Error setting default printer {printerName}");
+            _logger.LogWarning("Standarddrucker übersprungen: weder Name noch Freigabepfad angegeben");
             return false;
         }
+
+        _logger.LogInformation("Setze Standarddrucker {PrinterName} ({SharePath})", printerName, sharePath);
+
+        // Netzwerkdrucker heißen unter Windows in der Regel wie ihr UNC-Pfad, der in der
+        // Verwaltung hinterlegte Anzeigename kann davon abweichen — deshalb beide prüfen.
+        var script = $$"""
+            $candidates = @({{Quote(sharePath ?? string.Empty)}}, {{Quote(printerName)}}) |
+                Where-Object { $_ }
+            $printer = Get-CimInstance -ClassName Win32_Printer |
+                Where-Object { $candidates -contains $_.Name } |
+                Select-Object -First 1
+            if (-not $printer) {
+                Write-Error "Drucker nicht gefunden"
+                exit 1
+            }
+            Invoke-CimMethod -InputObject $printer -MethodName SetDefaultPrinter -ErrorAction Stop | Out-Null
+            """;
+
+        var result = await ExecutePowerShellAsync(script, cancellationToken);
+
+        if (result)
+            _logger.LogInformation("Standarddrucker gesetzt: {PrinterName}", printerName);
+        else
+            _logger.LogWarning("Standarddrucker konnte nicht gesetzt werden: {PrinterName}", printerName);
+
+        return result;
     }
 
-    private async Task<bool> ExecutePowerShellAsync(string script)
+    /// <summary>
+    /// Bettet einen Wert als PowerShell-Literal in einfachen Anführungszeichen ein.
+    /// Ohne das Verdoppeln des Apostrophs könnte ein Druckername wie
+    /// <c>x'; Invoke-Expression ...; '</c> beliebigen Code ausführen.
+    /// </summary>
+    internal static string Quote(string value) => "'" + (value ?? string.Empty).Replace("'", "''") + "'";
+
+    private async Task<bool> ExecutePowerShellAsync(string script, CancellationToken cancellationToken)
     {
-        return await Task.Run(() =>
+        // -EncodedCommand umgeht das Quoting der Kommandozeile vollständig; damit können
+        // Anführungszeichen, Zeilenumbrüche und Sonderzeichen im Skript nichts kaputt machen.
+        var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
+
+        var startInfo = new ProcessStartInfo
         {
-            try
+            FileName = "powershell.exe",
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        startInfo.ArgumentList.Add("-NoProfile");
+        startInfo.ArgumentList.Add("-NonInteractive");
+        startInfo.ArgumentList.Add("-ExecutionPolicy");
+        startInfo.ArgumentList.Add("Bypass");
+        startInfo.ArgumentList.Add("-EncodedCommand");
+        startInfo.ArgumentList.Add(encoded);
+
+        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutSource.CancelAfter(ScriptTimeout);
+
+        try
+        {
+            using var process = Process.Start(startInfo);
+            if (process == null)
             {
-                var startInfo = new ProcessStartInfo
-                {
-                    FileName = "powershell.exe",
-                    Arguments = $"-NoProfile -ExecutionPolicy Bypass -Command \"{script}\"",
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true
-                };
-
-                using var process = Process.Start(startInfo);
-                if (process == null)
-                {
-                    _logger.LogError("Failed to start PowerShell process");
-                    return false;
-                }
-
-                process.WaitForExit();
-                var output = process.StandardOutput.ReadToEnd();
-                var error = process.StandardError.ReadToEnd();
-
-                if (!string.IsNullOrWhiteSpace(output))
-                {
-                    _logger.LogDebug($"PowerShell output: {output}");
-                }
-
-                if (process.ExitCode != 0)
-                {
-                    _logger.LogError($"PowerShell script failed with exit code {process.ExitCode}. Error: {error}");
-                    return false;
-                }
-
-                return true;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error executing PowerShell script");
+                _logger.LogError("PowerShell-Prozess konnte nicht gestartet werden");
                 return false;
             }
-        });
+
+            // Erst lesen, dann warten: umgekehrt blockiert der Prozess, sobald er den
+            // Pipe-Puffer füllt, und WaitForExit kehrt nie zurück.
+            var outputTask = process.StandardOutput.ReadToEndAsync();
+            var errorTask = process.StandardError.ReadToEndAsync();
+
+            try
+            {
+                await process.WaitForExitAsync(timeoutSource.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                TryKill(process);
+
+                if (cancellationToken.IsCancellationRequested)
+                    throw;
+
+                _logger.LogError("PowerShell-Skript nach {Timeout} abgebrochen", ScriptTimeout);
+                return false;
+            }
+
+            var output = await outputTask;
+            var error = await errorTask;
+
+            if (!string.IsNullOrWhiteSpace(output))
+            {
+                _logger.LogDebug("PowerShell-Ausgabe: {Output}", output.Trim());
+            }
+
+            if (process.ExitCode != 0)
+            {
+                _logger.LogError("PowerShell-Skript mit Exit-Code {ExitCode} beendet. Fehler: {Error}",
+                    process.ExitCode, error.Trim());
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(error))
+            {
+                _logger.LogWarning("PowerShell-Fehlerausgabe: {Error}", error.Trim());
+            }
+
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Fehler beim Ausführen des PowerShell-Skripts");
+            return false;
+        }
+    }
+
+    private void TryKill(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "PowerShell-Prozess konnte nicht beendet werden");
+        }
     }
 }

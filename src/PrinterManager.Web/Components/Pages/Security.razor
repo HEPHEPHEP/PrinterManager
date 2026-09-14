@@ -8,11 +8,16 @@
 
 @if (!AuthState.IsAuthenticated)
 {
-    Navigation.NavigateTo("/login");
+    <RedirectToLogin />
 }
 else
 {
 <h1>Sicherheitseinstellungen</h1>
+
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger">@errorMessage</div>
+}
 
 @if (AuthState.Role != "Administrator")
 {
@@ -26,9 +31,6 @@ else
         </li>
         <li class="nav-item">
             <a class="nav-link @(activeTab == "ldap" ? "active" : "")" @onclick='() => activeTab = "ldap"' style="cursor: pointer;">LDAP-Einstellungen</a>
-        </li>
-        <li class="nav-item">
-            <a class="nav-link @(activeTab == "ssl" ? "active" : "")" @onclick='() => activeTab = "ssl"' style="cursor: pointer;">SSL/HTTPS</a>
         </li>
     </ul>
 
@@ -195,56 +197,10 @@ else
                     </EditForm>
 
                     <div class="alert alert-info mt-3">
-                        <strong>Hinweis:</strong> Wenn LDAP aktiviert ist, werden alle Login-Versuche über LDAP authentifiziert.
-                        Lokale Benutzer können sich dann nicht mehr anmelden.
-                    </div>
-                </div>
-            </div>
-        }
-    }
-    else if (activeTab == "ssl")
-    {
-        <h3>SSL/HTTPS Konfiguration</h3>
-
-        @if (sslConfig == null)
-        {
-            <p><em>Laden...</em></p>
-        }
-        else
-        {
-            <div class="card">
-                <div class="card-body">
-                    <EditForm Model="@sslConfig" OnValidSubmit="SaveSslConfig">
-                        <div class="mb-3 form-check">
-                            <InputCheckbox class="form-check-input" @bind-Value="sslConfig.Enabled" />
-                            <label class="form-check-label">HTTPS aktivieren</label>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">HTTPS Port:</label>
-                            <InputNumber class="form-control" @bind-Value="sslConfig.HttpsPort" />
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Zertifikatspfad:</label>
-                            <InputText class="form-control" @bind-Value="sslConfig.CertificatePath" placeholder="/path/to/certificate.pfx" />
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Zertifikatspasswort:</label>
-                            <InputText type="password" class="form-control" @bind-Value="sslConfig.CertificatePassword" />
-                        </div>
-                        <button type="submit" class="btn btn-primary">Einstellungen speichern</button>
-                        @if (!string.IsNullOrEmpty(sslMessage))
-                        {
-                            <div class="alert alert-success mt-3">@sslMessage</div>
-                        }
-                    </EditForm>
-
-                    <div class="alert alert-warning mt-3">
-                        <strong>Wichtig:</strong> Nach dem Aktivieren von SSL muss der Server neu gestartet werden, damit die Änderungen wirksam werden.
-                    </div>
-
-                    <div class="alert alert-info mt-3">
-                        <h6>Zertifikat erstellen:</h6>
-                        <code>dotnet dev-certs https --export-path /path/to/certificate.pfx --password IhrPasswort</code>
+                        <strong>Hinweis:</strong> Bei aktiviertem LDAP wird zuerst dort geprüft. Schlägt das
+                        fehl, versucht der Server anschließend die lokale Anmeldung — eine fehlerhafte
+                        LDAP-Konfiguration sperrt den lokalen Administrator also nicht aus.
+                        Auf Port 636 wird LDAPS verwendet, sonst StartTLS versucht.
                     </div>
                 </div>
             </div>
@@ -259,17 +215,19 @@ else
     private bool showAddForm = false;
     private RegisterUserDto newUser = new() { Username = "", Password = "" };
     private LdapConfigDto? ldapConfig;
-    private SslConfigDto? sslConfig;
     private string ldapMessage = "";
-    private string sslMessage = "";
+    private string errorMessage = "";
 
     protected override async Task OnInitializedAsync()
     {
+        // Ohne Anmeldung keine API-Aufrufe — der Server antwortet sonst mit 401.
+        if (!AuthState.IsAuthenticated)
+            return;
+
         if (AuthState.Role == "Administrator")
         {
             await LoadUsers();
             await LoadLdapConfig();
-            await LoadSslConfig();
         }
     }
 
@@ -281,7 +239,7 @@ else
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error loading users: {ex.Message}");
+            errorMessage = $"Benutzer konnten nicht geladen werden: {ex.Message}";
         }
     }
 
@@ -293,19 +251,7 @@ else
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error loading LDAP config: {ex.Message}");
-        }
-    }
-
-    private async Task LoadSslConfig()
-    {
-        try
-        {
-            sslConfig = await ApiService.GetSslConfigAsync();
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error loading SSL config: {ex.Message}");
+            errorMessage = $"LDAP-Konfiguration konnte nicht geladen werden: {ex.Message}";
         }
     }
 
@@ -317,6 +263,7 @@ else
 
     private async Task AddUser()
     {
+        errorMessage = "";
         try
         {
             await ApiService.RegisterAppUserAsync(newUser);
@@ -325,12 +272,13 @@ else
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error adding user: {ex.Message}");
+            errorMessage = $"Benutzer konnte nicht angelegt werden: {ex.Message}";
         }
     }
 
     private async Task MakeAdmin(int id)
     {
+        errorMessage = "";
         try
         {
             await ApiService.UpdateUserRoleAsync(id, "Administrator");
@@ -338,12 +286,13 @@ else
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error updating user role: {ex.Message}");
+            errorMessage = $"Rolle konnte nicht geändert werden: {ex.Message}";
         }
     }
 
     private async Task RemoveAdmin(int id)
     {
+        errorMessage = "";
         try
         {
             await ApiService.UpdateUserRoleAsync(id, "User");
@@ -351,12 +300,13 @@ else
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error updating user role: {ex.Message}");
+            errorMessage = $"Rolle konnte nicht geändert werden: {ex.Message}";
         }
     }
 
     private async Task DeleteUser(int id)
     {
+        errorMessage = "";
         try
         {
             await ApiService.DeleteAppUserAsync(id);
@@ -364,46 +314,25 @@ else
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error deleting user: {ex.Message}");
+            errorMessage = $"Benutzer konnte nicht gelöscht werden: {ex.Message}";
         }
     }
 
     private async Task SaveLdapConfig()
     {
+        errorMessage = "";
+        ldapMessage = "";
+
         if (ldapConfig != null)
         {
             try
             {
                 await ApiService.UpdateLdapConfigAsync(ldapConfig);
                 ldapMessage = "LDAP-Einstellungen erfolgreich gespeichert!";
-                StateHasChanged();
-                await Task.Delay(3000);
-                ldapMessage = "";
-                StateHasChanged();
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error saving LDAP config: {ex.Message}");
-            }
-        }
-    }
-
-    private async Task SaveSslConfig()
-    {
-        if (sslConfig != null)
-        {
-            try
-            {
-                await ApiService.UpdateSslConfigAsync(sslConfig);
-                sslMessage = "SSL-Einstellungen erfolgreich gespeichert! Bitte starten Sie den Server neu.";
-                StateHasChanged();
-                await Task.Delay(5000);
-                sslMessage = "";
-                StateHasChanged();
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error saving SSL config: {ex.Message}");
+                errorMessage = $"LDAP-Einstellungen konnten nicht gespeichert werden: {ex.Message}";
             }
         }
     }

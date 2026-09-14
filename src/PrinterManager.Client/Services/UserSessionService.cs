@@ -1,4 +1,6 @@
+using Microsoft.Extensions.Logging;
 using System.Management;
+using System.Runtime.Versioning;
 
 namespace PrinterManager.Client.Services;
 
@@ -7,69 +9,93 @@ public interface IUserSessionService
     string GetLoggedInUser();
 }
 
+[SupportedOSPlatform("windows")]
 public class UserSessionService : IUserSessionService
 {
+    private static readonly string[] SystemAccountMarkers =
+    {
+        "SYSTEM", "LOCAL SERVICE", "NETWORK SERVICE", "DWM-", "UMFD-"
+    };
+
+    private readonly ILogger<UserSessionService> _logger;
+
+    public UserSessionService(ILogger<UserSessionService> logger)
+    {
+        _logger = logger;
+    }
+
     public string GetLoggedInUser()
+    {
+        return GetConsoleUser() ?? GetInteractiveUser() ?? Environment.UserName;
+    }
+
+    private string? GetConsoleUser()
     {
         try
         {
-            // Query for logged-in users using WMI
-            using var searcher = new ManagementObjectSearcher(
-                "SELECT UserName FROM Win32_ComputerSystem");
+            using var searcher = new ManagementObjectSearcher("SELECT UserName FROM Win32_ComputerSystem");
+            using var results = searcher.Get();
 
-            foreach (ManagementObject mo in searcher.Get())
+            foreach (ManagementObject mo in results)
             {
-                var username = mo["UserName"]?.ToString();
-                if (!string.IsNullOrEmpty(username))
+                using (mo)
                 {
-                    return username;
+                    var username = mo["UserName"]?.ToString();
+                    if (!string.IsNullOrEmpty(username))
+                        return username;
                 }
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error getting logged-in user: {ex.Message}");
+            _logger.LogDebug(ex, "Angemeldeter Benutzer konnte nicht über Win32_ComputerSystem ermittelt werden");
         }
 
-        // Fallback: try to get interactive session user
+        return null;
+    }
+
+    private string? GetInteractiveUser()
+    {
         try
         {
-            using var searcher = new ManagementObjectSearcher(
-                "SELECT * FROM Win32_LoggedOnUser");
+            using var searcher = new ManagementObjectSearcher("SELECT * FROM Win32_LoggedOnUser");
+            using var results = searcher.Get();
 
-            foreach (ManagementObject mo in searcher.Get())
+            foreach (ManagementObject mo in results)
             {
-                var dependent = (ManagementBaseObject)mo["Dependent"];
-                var antecedent = (ManagementBaseObject)mo["Antecedent"];
-
-                if (dependent != null && antecedent != null)
+                using (mo)
                 {
-                    var domain = antecedent["Domain"]?.ToString();
-                    var name = antecedent["Name"]?.ToString();
+                    if (mo["Antecedent"] is not ManagementBaseObject antecedent)
+                        continue;
 
-                    if (!string.IsNullOrEmpty(domain) && !string.IsNullOrEmpty(name))
+                    using (antecedent)
                     {
-                        var fullName = $"{domain}\\{name}";
+                        var domain = antecedent["Domain"]?.ToString();
+                        var name = antecedent["Name"]?.ToString();
 
-                        // Skip system accounts
-                        if (!name.EndsWith("$") &&
-                            !fullName.Contains("SYSTEM") &&
-                            !fullName.Contains("LOCAL SERVICE") &&
-                            !fullName.Contains("NETWORK SERVICE") &&
-                            !fullName.Contains("DWM-"))
-                        {
-                            return fullName;
-                        }
+                        if (string.IsNullOrEmpty(domain) || string.IsNullOrEmpty(name))
+                            continue;
+
+                        var fullName = $@"{domain}\{name}";
+
+                        // Computer- und Dienstkonten überspringen
+                        if (name.EndsWith('$'))
+                            continue;
+
+                        if (SystemAccountMarkers.Any(marker =>
+                                fullName.Contains(marker, StringComparison.OrdinalIgnoreCase)))
+                            continue;
+
+                        return fullName;
                     }
                 }
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error getting interactive user: {ex.Message}");
+            _logger.LogDebug(ex, "Interaktiver Benutzer konnte nicht ermittelt werden");
         }
 
-        // Last fallback
-        return Environment.UserName;
+        return null;
     }
 }

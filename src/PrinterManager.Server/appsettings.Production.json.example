@@ -1,19 +1,13 @@
 {
-  "_HINWEIS": "Kopiere diese Datei nach appsettings.Production.json und fülle die Werte aus.",
+  "_HINWEIS": "Kopiere diese Datei nach appsettings.Production.json. Alles hier ist optional — fehlende Geheimnisse erzeugt der Server beim ersten Start selbst und legt sie in appsettings.Local.json ab.",
 
-  "Jwt": {
-    "Key": "HIER_EINEN_SICHEREN_SCHLÜSSEL_EINTRAGEN_MINDESTENS_32_ZEICHEN"
+  "Https": {
+    "_HINWEIS": "Zertifikat aus dem Windows-Zertifikatspeicher (z. B. per AD CS ausgestellt). Alternativ CertificatePath auf eine PFX-Datei zeigen lassen.",
+    "CertificateThumbprint": "AB12CD34EF56...",
+    "RedirectToHttps": true
   },
-  "Cors": {
-    "AllowedOrigins": [
-      "https://printermanager.meinefirma.de"
-    ]
-  },
-  "Ldap": {
-    "Enabled": false,
-    "Server": "",
-    "Port": 389,
-    "BaseDn": "",
-    "UserDnTemplate": ""
+  "ClientApi": {
+    "_HINWEIS": "Windows = Kerberos/NTLM, ohne Schlüsselverteilung. ApiKey nur, wenn die Clients nicht in der Domäne sind.",
+    "Authentication": "Windows"
   }
 }

@@ -49,7 +49,7 @@
         </div>
         <div class="nav-item px-3">
             <NavLink class="nav-link" href="configuration">
-                <span class="oi oi-cog" aria-hidden="true"></span> Konfiguration
+                <span class="oi oi-cog" aria-hidden="true"></span> Einstellungen
             </NavLink>
         </div>
         @if (AuthState.Role == "Administrator")
@@ -79,8 +79,12 @@
 @code {
     protected override void OnInitialized()
     {
-        AuthState.OnChange += StateHasChanged;
+        AuthState.OnChange += OnAuthStateChanged;
     }
+
+    // Das Event kann aus einem anderen Thread als dem Renderer kommen — StateHasChanged
+    // muss deshalb über den Synchronisationskontext des Circuits laufen.
+    private void OnAuthStateChanged() => _ = InvokeAsync(StateHasChanged);
 
     private void Logout()
     {
@@ -90,6 +94,6 @@
 
     public void Dispose()
     {
-        AuthState.OnChange -= StateHasChanged;
+        AuthState.OnChange -= OnAuthStateChanged;
     }
 }

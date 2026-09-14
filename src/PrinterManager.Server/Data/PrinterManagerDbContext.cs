@@ -18,7 +18,6 @@ public class PrinterManagerDbContext : DbContext
     public DbSet<SystemConfiguration> SystemConfigurations => Set<SystemConfiguration>();
     public DbSet<ApplicationUser> ApplicationUsers => Set<ApplicationUser>();
     public DbSet<LdapConfiguration> LdapConfigurations => Set<LdapConfiguration>();
-    public DbSet<SslConfiguration> SslConfigurations => Set<SslConfiguration>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -122,18 +121,9 @@ public class PrinterManagerDbContext : DbContext
             entity.HasKey(e => e.Id);
         });
 
-        // SslConfiguration
-        modelBuilder.Entity<SslConfiguration>(entity =>
-        {
-            entity.HasKey(e => e.Id);
-        });
-
-        // Admin-Benutzer wird NICHT mehr per Seed mit festem Hash erstellt.
-        // Stattdessen wird beim ersten Start ein Admin mit Passwort aus der
-        // Umgebungsvariable ADMIN_PASSWORD erstellt (siehe Program.cs).
-        // 
-        // Falls die DB bereits einen alten SHA256-Admin-Hash enthält:
-        // Beim nächsten Login wird der Hash automatisch auf BCrypt migriert.
+        // Der Admin-Benutzer wird bewusst nicht per Seed mit festem Hash angelegt,
+        // sondern beim ersten Start erzeugt (siehe FirstRunSetup) — mit einem
+        // erzeugten Passwort oder dem Wert aus ADMIN_PASSWORD.
 
         // Seed default LDAP configuration (leer — wird über Admin-UI konfiguriert)
         modelBuilder.Entity<LdapConfiguration>().HasData(
@@ -145,16 +135,6 @@ public class PrinterManagerDbContext : DbContext
                 Port = 389,
                 BaseDn = "",
                 UserDnTemplate = ""
-            }
-        );
-
-        // Seed default SSL configuration
-        modelBuilder.Entity<SslConfiguration>().HasData(
-            new SslConfiguration
-            {
-                Id = 1,
-                Enabled = false,
-                HttpsPort = 5443
             }
         );
     }

@@ -1,12 +1,31 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration.EnvironmentVariables;
+using Microsoft.Extensions.Configuration.Json;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using PrinterManager.Server.Data;
+using PrinterManager.Server.Security;
 using PrinterManager.Server.Services;
+using PrinterManager.Server.Setup;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// appsettings.Local.json enthält die erzeugten Geheimnisse und die über die Oberfläche
+// gepflegten Einstellungen. Die Datei wird direkt vor den Umgebungsvariablen eingehängt:
+// sie überstimmt damit appsettings.json, eine gesetzte Umgebungsvariable überstimmt aber
+// weiterhin die Oberfläche.
+InsertLocalSettingsSource(builder);
+
+// Fehlende Pflichtgeheimnisse beim ersten Start erzeugen. Dadurch läuft eine frische
+// Installation ohne vorbereitete Umgebungsvariablen.
+var secrets = LocalSecrets.Ensure(builder.Configuration, builder.Environment.ContentRootPath);
+if (secrets.Values.Count > 0)
+{
+    builder.Configuration.AddInMemoryCollection(secrets.Values);
+}
 
 // Add services to the container.
 builder.Services.AddControllers();
@@ -44,15 +63,23 @@ builder.Services.AddSwaggerGen(c =>
 builder.Services.AddDbContext<PrinterManagerDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-// Add Authentication
-var jwtKey = builder.Configuration["Jwt:Key"];
-if (string.IsNullOrEmpty(jwtKey) || jwtKey.Length < 32)
+// Add Authentication — der Schlüssel ist an dieser Stelle garantiert vorhanden,
+// weil LocalSecrets ihn sonst erzeugt hat.
+var jwtKey = builder.Configuration["Jwt:Key"]!;
+// Einmal beim Start festhalten und als Singleton bereitstellen: der Negotiate-Handler
+// wird nur hier registriert, ein späterer Moduswechsel darf deshalb nicht durchschlagen.
+var clientAuthentication = ClientAuthenticationOptions.Read(builder.Configuration);
+builder.Services.AddSingleton(clientAuthentication);
+
+var authentication = builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme);
+
+if (clientAuthentication.Mode == ClientAuthenticationMode.Windows)
 {
-    throw new InvalidOperationException(
-        "FEHLER: Jwt:Key ist nicht konfiguriert oder zu kurz (min. 32 Zeichen). " +
-        "Setze den Wert in appsettings.json, appsettings.Production.json oder als Umgebungsvariable Jwt__Key.");
+    // Kerberos/NTLM für die Client-Endpunkte. Die Weboberfläche bleibt bei JWT.
+    authentication.AddNegotiate();
 }
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+
+authentication
     .AddJwtBearer(options =>
     {
         options.TokenValidationParameters = new TokenValidationParameters
@@ -67,7 +94,14 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 
-builder.Services.AddAuthorization();
+// Standardmäßig ist JEDER Endpunkt geschützt. Endpunkte, die bewusst offen sein
+// sollen (Login, Client-Registrierung), müssen [AllowAnonymous] tragen.
+builder.Services.AddAuthorization(options =>
+{
+    options.FallbackPolicy = new AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .Build();
+});
 
 // Add services
 builder.Services.AddScoped<IPrinterService, PrinterService>();
@@ -77,6 +111,7 @@ builder.Services.AddScoped<IPrintServerScanService, PrintServerScanService>();
 builder.Services.AddScoped<IAuthenticationService, AuthenticationService>();
 builder.Services.AddScoped<ILdapService, LdapService>();
 builder.Services.AddScoped<ISecurityConfigService, SecurityConfigService>();
+builder.Services.AddScoped<IServerSettingsService, ServerSettingsService>();
 
 // Add CORS — konfigurierbar über Cors:AllowedOrigins
 var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
@@ -107,47 +142,33 @@ builder.Services.AddCors(options =>
     });
 });
 
-// Configure HTTP only by default (HTTPS can be enabled in UI)
-builder.WebHost.ConfigureKestrel(options =>
+// HTTPS-Endpunkt samt Zertifikat einrichten (übernimmt dabei den HTTP-Endpunkt).
+var https = HttpsSetup.Configure(builder);
+
+builder.Services.AddSingleton(https);
+
+if (https.Enabled)
 {
-    options.ListenAnyIP(5000); // HTTP
-});
+    // Ohne festen Port müsste die Umleitung ihn aus den Serveradressen erraten.
+    builder.Services.AddHttpsRedirection(options => options.HttpsPort = https.Port);
+}
+
+// Standard-Port, solange nichts anderes konfiguriert ist. Eine feste Listen-Adresse
+// würde "Urls", --urls und ASPNETCORE_URLS wirkungslos machen.
+var urlsConfigured = !string.IsNullOrEmpty(builder.Configuration["Urls"])
+    || builder.Configuration.GetSection("Kestrel:Endpoints").GetChildren().Any();
+
+if (!urlsConfigured)
+{
+    builder.WebHost.ConfigureKestrel(options => options.ListenAnyIP(5000));
+}
 
 var app = builder.Build();
 
-// Ensure database is created
-using (var scope = app.Services.CreateScope())
-{
-    var db = scope.ServiceProvider.GetRequiredService<PrinterManagerDbContext>();
-    db.Database.EnsureCreated();
-    
-    // Admin-Benutzer beim ersten Start erstellen (mit BCrypt-Hash)
-    if (!db.ApplicationUsers.Any(u => u.Role == PrinterManager.Shared.Models.UserRole.Administrator))
-    {
-        var adminPassword = builder.Configuration["AdminPassword"]
-            ?? Environment.GetEnvironmentVariable("ADMIN_PASSWORD");
-        
-        if (string.IsNullOrEmpty(adminPassword) || adminPassword.Length < 8)
-        {
-            throw new InvalidOperationException(
-                "FEHLER: Kein Admin-Benutzer vorhanden und ADMIN_PASSWORD nicht gesetzt (min. 8 Zeichen). " +
-                "Setze die Umgebungsvariable ADMIN_PASSWORD beim ersten Start.");
-        }
-        
-        db.ApplicationUsers.Add(new PrinterManager.Shared.Models.ApplicationUser
-        {
-            Username = "admin",
-            PasswordHash = BCrypt.Net.BCrypt.HashPassword(adminPassword, workFactor: 12),
-            IsActive = true,
-            IsLdapUser = false,
-            Role = PrinterManager.Shared.Models.UserRole.Administrator,
-            CreatedAt = DateTime.UtcNow
-        });
-        db.SaveChanges();
-        
-        Console.WriteLine("✓ Admin-Benutzer erstellt: admin (Passwort aus ADMIN_PASSWORD)");
-    }
-}
+// Datenbank anlegen und beim ersten Start einen Administrator erzeugen.
+await FirstRunSetup.RunAsync(app);
+
+StartupReport.Write(app, secrets, https, clientAuthentication.Mode);
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
@@ -156,10 +177,42 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-// Don't force HTTPS redirection (can be enabled via UI)
+// Umleitung erst aktivieren, wenn ein vertrauenswürdiges Zertifikat vorliegt — sonst
+// laufen die Clients in Zertifikatsfehler statt in eine funktionierende Verbindung.
+if (https.Enabled && app.Configuration.GetValue("Https:RedirectToHttps", false))
+{
+    app.UseHsts();
+    app.UseHttpsRedirection();
+}
+
 app.UseCors("Configured");
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+
+// appsettings.Local.json direkt vor den Umgebungsvariablen einhängen, damit die
+// Rangfolge stimmt: appsettings.json < appsettings.Local.json < Umgebung < Kommandozeile.
+static void InsertLocalSettingsSource(WebApplicationBuilder builder)
+{
+    // Der Dateianbieter wird beim Build aus dem Content-Root ergänzt (EnsureDefaults).
+    var source = new JsonConfigurationSource
+    {
+        Path = LocalSettingsFile.FileName,
+        Optional = true,
+        ReloadOnChange = false
+    };
+
+    var sources = ((IConfigurationBuilder)builder.Configuration).Sources;
+    var index = sources.ToList().FindIndex(existing => existing is EnvironmentVariablesConfigurationSource);
+
+    if (index < 0)
+    {
+        sources.Add(source);
+    }
+    else
+    {
+        sources.Insert(index, source);
+    }
+}
